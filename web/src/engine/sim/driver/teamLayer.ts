@@ -13,7 +13,10 @@
 // mechanism they share (s20c), plus entryAbility, support and the PP stall loop
 // (s20c2). The entry-ability and support probes run on cloned sessions, and the
 // PP loop keeps a per-layer stall counter plus a latched stop; none of them
-// touch the real RNG.
+// touch the real RNG. The PP loop also prices each bench candidate's SWITCH-IN
+// on its own clone: entry hazards (`applySwitchInHazards`) and Toxic Terrain
+// chip, plus the queue line's own Toxic Spikes disqualification, so a loop that
+// is free of move damage but not of switching is not counted as free (s20c2bb).
 //
 // Pure and headless: no React, no I/O. Every game rule cites the C or the data
 // row that fixes it; every threshold a player chose is marked MODEL CHOICE.
@@ -24,6 +27,7 @@ import { doesBattlerHaveAbilityShield } from '../ai/aiAbilityHelpers'
 import {
   DEFAULT_STAT_STAGE,
   SIDE_STATUS_SAFEGUARD,
+  SIDE_STATUS_TOXIC_SPIKES,
   STAT_ATK,
   STATUS1_ANY,
   STATUS1_BURN,
@@ -31,10 +35,15 @@ import {
   STATUS1_POISON_ANY,
   STATUS3_GASTRO_ACID,
   STATUS_FIELD_TERRAIN_ANY,
+  STATUS_FIELD_TERRAIN_PERMANENT,
+  STATUS_FIELD_TOXIC_TERRAIN,
   WEATHER_FOG_ANY,
   hasFlag,
 } from '../constants'
 import { canBattlerEscape, isAbilityPreventingEscape, type EscapeDeps } from '../escape'
+import { isAbilityOnField, toxicTerrainDamage } from '../fieldEndTurn'
+import { isBattlerGrounded } from '../grounding'
+import { applySwitchInHazards } from '../hazards'
 import type { BattleState, BattlerState } from '../state'
 import { battlerHasSimAbility, isBattlerWeatherAffected } from '../statBuffs'
 import { applySwitchInAbilities, type BattleStartDeps } from '../switchInAbility'
@@ -372,6 +381,9 @@ function switchChoice(
 const ENTRY_PROBE_SEED = 0
 // The support probe's own clone seed, for the same reason.
 const SUPPORT_PROBE_SEED = 0
+// The PP loop's switch-in probe seed: its clone takes hazard damage and Toxic
+// Terrain chip, never the real session or its RNG.
+const PP_LOOP_PROBE_SEED = 0
 
 /** The entry abilities the purpose simulates. C sources:
  * Intimidate data `abilities.cc:764-768` and `Impl<ABILITY_INTIMIDATE>`
@@ -791,7 +803,8 @@ function theirUsableMoves(session: BattleSession): string[] {
 }
 
 interface PpLoopIncoming {
-  /** The largest highest-roll among their usable moves onto this mon. */
+  /** The largest highest-roll among their usable moves onto this mon, plus the
+   * bench candidate's switch-in HP cost (0 for the active mon). */
   highest: number
   /** The mon's current HP. */
   hp: number
@@ -818,7 +831,12 @@ function withGastroAcid(probe: BattleSession): BattleSession {
  * target (battle_scripts_1.s:1392-1396, 1403-1405), so it never statuses a
  * clean mon; Toxic Spikes / Caltrops lay a field hazard rather than statusing
  * the move's target; and protecting moves that status on contact need us to
- * attack. Damaging moves are untouched -- their damage already counts. */
+ * attack. Yawn is not a threat in a loop that switches every turn: setyawn only
+ * sets STATUS3_YAWN_TURN(2) (battle_script_commands.c:11852), the sleep lands
+ * on the SECOND end of turn (battle_util.c:2839-2842), and every switch except
+ * Baton Pass clears gStatuses3 (battle_main.c:2834-2840; Baton Pass keeps only
+ * the listed bits, YAWN not among them, :2822-2824), so it never sleeps
+ * anyone. Damaging moves are untouched -- their damage already counts. */
 function statusLandsOnUs(
   session: BattleSession,
   moveId: string,
@@ -839,9 +857,6 @@ function statusLandsOnUs(
     case 'EFFECT_PARALYZE_IGNORE_TYPE':
     case 'EFFECT_SLEEP':
       return statusMoveWorks(probe, moveId, move.effect, 1, 0)
-    case 'EFFECT_YAWN':
-      // requirecandoeffect ... MOVE_EFFECT_SLEEP, battle_scripts_1.s:6411-6417.
-      return statusMoveWorks(probe, moveId, 'EFFECT_SLEEP', 1, 0)
     case 'EFFECT_TOXIC_THREAD':
       // setmoveeffect MOVE_EFFECT_POISON, battle_scripts_1.s:1727-1728.
       return statusMoveWorks(probe, moveId, 'EFFECT_POISON', 1, 0)
@@ -899,11 +914,72 @@ function statusLandsOnUs(
   }
 }
 
+/** The HP a bench candidate pays to enter, or null when the entry would status
+ * it. Both are read off one clone of the session with the candidate standing in
+ * as battler 0 (`stateWithReserve` + `cloneSession`, the same probe shape
+ * `entryProbeFor` / `ruleSupport` use); the real session and its RNG are never
+ * touched.
+ *
+ * Hazards: `applySwitchInHazards` is the sim's own port of
+ * VARIOUS_DO_HAZARD_DAMAGE (battle_script_commands.c:8711-8800) and already
+ * knows Spikes, Stealth Rock and Toxic Spikes, so the cost is what the probe's
+ * HP lost, not a re-derivation. `probe.turnDeps` supplies the `HazardDeps`
+ * surface (grounding, dataContext, hazardTypes). A move range of 0 or an
+ * immunity does not waive this: entering still costs HP.
+ *
+ * Toxic Terrain: the ENDTURN_TOXIC_TERRAIN chip (battle_util.c:2124-2146,
+ * maxHP/16 via `hpfractiontodamage BS_STACK_1, 16`,
+ * data/battle_scripts_1.s:10167-10168) lands on the same probe AFTER the
+ * hazards, so it is capped by the HP they left. The C decrements the timer
+ * before the damage loop (:2127-2128): a timer of 1 clears the flag and chips
+ * nobody, so a terrain about to expire adds nothing. A permanent terrain,
+ * `started.terrain`, or Stench on the field also suppresses the decrement.
+ *
+ * Toxic Spikes: not a damage cost but a disqualification -- a grounded
+ * non-Poison/non-Steel candidate would leave the switch poisoned, which the
+ * loop cannot call free. This is deliberately the queue line's own rule, and
+ * it is stricter than the C's `CanBePoisoned` gate (battle_script_commands.c:
+ * 8773) for a mon that already has a status1. */
+function ppLoopSwitchInCost(session: BattleSession, slot: number): number | null {
+  const reserve = session.state.sides[0].party[slot]
+  if (!reserve || reserve.speciesId === null) return null
+  const probe = cloneSession(
+    { ...session, state: stateWithReserve(session.state, 0, reserve, slot) },
+    PP_LOOP_PROBE_SEED,
+  )
+  const hpBefore = probe.state.battlers[0]?.mon.hp ?? 0
+  if (hpBefore <= 0) return null
+
+  const side = session.state.sides[0]
+  if (hasFlag(side.statuses, SIDE_STATUS_TOXIC_SPIKES) && side.timers.toxicSpikesAmount >= 1) {
+    const types: readonly string[] = probe.state.battlers[0]?.mon.types ?? []
+    const grounded = isBattlerGrounded(probe.state, 0, {
+      ...probe.turnDeps.grounding,
+      attackerHasMoldBreaker: false,
+    })
+    if (grounded && !types.includes('POISON') && !types.includes('STEEL')) return null
+  }
+
+  applySwitchInHazards(probe.state, 0, probe.turnDeps, [])
+  const hazardCost = hpBefore - (probe.state.battlers[0]?.mon.hp ?? 0)
+
+  const terrainExpires =
+    hasFlag(probe.state.field.statuses, STATUS_FIELD_TOXIC_TERRAIN) &&
+    !hasFlag(probe.state.field.statuses, STATUS_FIELD_TERRAIN_PERMANENT) &&
+    !probe.state.field.timers.started.terrain &&
+    !isAbilityOnField(probe.state, 'ABILITY_STENCH') &&
+    probe.state.field.timers.terrainTimer === 1
+  const terrainCost = terrainExpires ? 0 : toxicTerrainDamage(probe.state, 0, probe.turnDeps.grounding)
+  return hazardCost + terrainCost
+}
+
 /** The largest highest-roll their usable moves can land on our active mon
- * (battler 0) or a bench slot, and that mon's current HP. Null when they have
- * no usable move (at least one is required), the mon is not alive, or any usable
- * move can land a non-volatile status on it (`statusLandsOnUs`). A null or
- * immune range contributes zero. */
+ * (battler 0) or a bench slot -- plus, for a bench slot, the `highest` value
+ * also carries the switch-in cost from `ppLoopSwitchInCost` (hazards and Toxic
+ * Terrain) -- and that mon's current HP. Null when they have no usable move (at
+ * least one is required), the mon is not alive, any usable move can land a
+ * non-volatile status on it (`statusLandsOnUs`), or the bench entry would be
+ * disqualified by Toxic Spikes. A null or immune range contributes zero. */
 function ppLoopIncoming(
   session: BattleSession,
   theirMoves: readonly string[],
@@ -930,6 +1006,11 @@ function ppLoopIncoming(
         : rangeOnOurReserve(session, moveId, slot)
     if (range && !range.isImmune) highest = Math.max(highest, highestRoll(range))
   }
+  if (slot !== 'active') {
+    const switchInCost = ppLoopSwitchInCost(session, slot)
+    if (switchInCost === null) return null
+    highest += switchInCost
+  }
   return { highest, hp }
 }
 
@@ -940,10 +1021,13 @@ function takesLittleOrNothing(incoming: PpLoopIncoming | null): incoming is PpLo
 /** ppLoop: two of our mons both take little or nothing from every move their
  * mon has, so alternate them to drain its PP. Fires only when the ACTIVE mon
  * and at least one bench slot both qualify, and switches to the qualifying slot
- * whose worst-case fraction of HP is smallest (ties go to the lower slot). The
- * stall tracker (updated on every `policy` call) latches `stopped` once both
- * sides have switched for `PP_LOOP_STALL_LIMIT` turns with no HP or PP change;
- * the latch survives later turns and only a non-consecutive turn clears it. */
+ * whose worst-case fraction of HP is smallest (ties go to the lower slot). A
+ * bench slot's worst case includes its switch-in cost (`ppLoopSwitchInCost`:
+ * entry hazards and Toxic Terrain, measured on a cloned probe; Toxic Spikes
+ * disqualifies outright). The stall tracker (updated on every `policy` call)
+ * latches `stopped` once both sides have switched for `PP_LOOP_STALL_LIMIT`
+ * turns with no HP or PP change; the latch survives later turns and only a
+ * non-consecutive turn clears it. */
 function rulePpLoop(
   session: BattleSession,
   view: PredictionView,

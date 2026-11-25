@@ -10,7 +10,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { aiDamageRolls } from './ai/aiCalcDamage'
-import { STATUS1_BURN, STATUS_FIELD_MISTY_TERRAIN } from './constants'
+import { STATUS1_BURN } from './constants'
 import { buildPlayerParty } from './driver/buildParty'
 import type { PlayerMonSpec } from './driver/buildParty'
 import { loadSimData, type TrainerData, type TrainerMonData } from './driver/loadSimData'
@@ -168,15 +168,10 @@ describe('cycle s20c2b - PP loop: a status move disqualifies a loop member', () 
 })
 
 describe('cycle s20c2b - PP loop: the status effect table', () => {
-  it('Yawn: does not loop, but loops under Misty Terrain', () => {
+  it('Yawn: loops, because a switch clears the drowsiness', () => {
     const s = session([OUR_DUSKNOIR, OUR_DUSKNOIR], foe(['MOVE_BODY_SLAM', 'MOVE_YAWN']))
     expectImmuneBoth(s, 'MOVE_BODY_SLAM')
-    expect(decide(s)[0]).toBe('attacker')
-
-    const misty = session([OUR_DUSKNOIR, OUR_DUSKNOIR], foe(['MOVE_BODY_SLAM', 'MOVE_YAWN']))
-    misty.state.field.statuses = STATUS_FIELD_MISTY_TERRAIN
-    expectImmuneBoth(misty, 'MOVE_BODY_SLAM')
-    expect(decide(misty)).toEqual(['team', 'ppLoop'])
+    expect(decide(s)).toEqual(['team', 'ppLoop'])
   })
 
   it('Will-O-Wisp: does not loop, but a Fire-immune pair loops', () => {

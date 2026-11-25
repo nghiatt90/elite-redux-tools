@@ -441,6 +441,26 @@ function isBattlerTerrainAffectedByToxicTerrain(state: BattleState, battlerId: n
   return TOXIC_TERRAIN_AIRBORNE_ABILITIES.some((id) => battlerHasAbility(battler.mon.abilities, id, () => false))
 }
 
+/** The ENDTURN_TOXIC_TERRAIN per-battler FILTER chain (:2134-2139) and
+ * BattleScript_ToxicTerrainDamages' `hpfractiontodamage BS_STACK_1, 16`
+ * (data/battle_scripts_1.s:10167), as one value: 0 when the battler is not
+ * alive, Magic Guard protected, not terrain affected, ability immune, or
+ * Poison/Steel typed; else maxHP/16 capped at the CURRENT HP and floored at 1
+ * (Cmd_various, battle_script_commands.c:9017-9022). Extracted so the team
+ * layer's PP-loop probe can price the chip on a borrowed battler without
+ * re-deriving the filter. The expiry decrement (:2127-2128) is the CALLER's
+ * job: this function does not touch the timer. */
+export function toxicTerrainDamage(state: BattleState, battlerId: number, grounding: GroundingContext): number {
+  if (!isAlive(state, battlerId)) return 0
+  const battler = state.battlers[battlerId]
+  if (!battler) return 0
+  if (isMagicGuardProtected(state, battler)) return 0
+  if (!isBattlerTerrainAffectedByToxicTerrain(state, battlerId, battler, grounding)) return 0
+  if (hasAnyAbility(battler.mon.abilities, TOXIC_TERRAIN_IMMUNE_ABILITY_IDS)) return 0
+  if (battler.mon.types.includes('POISON') || battler.mon.types.includes('STEEL')) return 0
+  return Math.max(1, Math.min(battler.mon.hp, Math.trunc(battler.mon.maxHp / 16)))
+}
+
 /** Abilities whose abilityHooks.json `allowTerrainIfAirborne` includes
  * TERRAIN_TOXIC. Pinned to the snapshot by turnFieldEndTurn.test.ts. */
 export const TOXIC_TERRAIN_AIRBORNE_ABILITIES: readonly string[] = ['ABILITY_TOXIC_SURGE']
@@ -854,14 +874,9 @@ export function runFieldEndTurnEffects(
       }
     }
     for (let battlerId = 0; battlerId < state.battlersCount; battlerId++) {
-      if (!isAlive(state, battlerId)) continue
-      const battler = state.battlers[battlerId]
-      if (!battler) continue
-      if (isMagicGuardProtected(state, battler)) continue
-      if (!isBattlerTerrainAffectedByToxicTerrain(state, battlerId, battler, grounding)) continue
-      if (hasAnyAbility(battler.mon.abilities, TOXIC_TERRAIN_IMMUNE_ABILITY_IDS)) continue
-      if (battler.mon.types.includes('POISON') || battler.mon.types.includes('STEEL')) continue
-      const dmg = Math.max(1, Math.min(battler.mon.hp, Math.trunc(battler.mon.maxHp / 16)))
+      const dmg = toxicTerrainDamage(state, battlerId, grounding)
+      if (dmg === 0) continue
+      const battler = state.battlers[battlerId]!
       const next = battler.mon.hp - dmg
       battler.mon.hp = next
       syncPartyHp(state, battlerId)
