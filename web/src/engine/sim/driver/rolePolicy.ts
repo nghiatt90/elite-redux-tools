@@ -41,6 +41,7 @@ import {
   STATUS_FIELD_PSYCHIC_TERRAIN,
   STATUS_FIELD_TOXIC_TERRAIN,
   STATUS_FIELD_TRICK_ROOM,
+  WEATHER_FOG_ANY,
   WEATHER_HAIL_ANY,
   WEATHER_PRIMAL_ANY,
   WEATHER_RAIN_ANY,
@@ -50,7 +51,14 @@ import {
 import { weatherHasEffect } from '../fieldEndTurn'
 import type { BattleState, SimBattleMon, SimPartyMon } from '../state'
 import { battlerHasSimAbility, isBattlerWeatherAffected } from '../statBuffs'
-import { canBeBurned, canBeParalyzed, canBeParalyzedIgnoreType, canBePoisoned, canSleep } from '../statusEffects'
+import {
+  canBeBurned,
+  canBeParalyzed,
+  canBeParalyzedIgnoreType,
+  canBePoisoned,
+  canSleep,
+  isPowderImmune,
+} from '../statusEffects'
 import { buildTurnOrderContext } from '../turn'
 import type { ChosenAction } from '../turnOrder'
 import { getWhoStrikesFirst } from '../turnOrder'
@@ -530,19 +538,48 @@ const STATUS_EFFECTS: ReadonlySet<string> = new Set([
 
 /** Whether `moveId`'s status effect can land on battler 1, using the same
  * CanBe* helpers the move handlers use (so type immunity -- Fire vs Will-O-Wisp,
- * Poison/Steel vs Toxic -- and an existing status are respected). */
+ * Poison/Steel vs Toxic -- and an existing status are respected), plus the two
+ * gates that run before them: the powder canceller
+ * (CANCELLER_POWDER_MOVE, battle_util.c:3455-3466 -> IsPowderImmune :3190-3197)
+ * and, for EFFECT_PARALYZE only, typecalc (battle_scripts_1.s:4366). */
 export function statusMoveWorks(session: BattleSession, moveId: string, effect: string): boolean {
   if (((session.state.battlers[1]?.mon.status1 ?? 0) & STATUS1_ANY) !== 0) return false
   const deps = aiDamageDepsFor(session.data, session.state, session.inverseBattle)
+  // CANCELLER_POWDER_MOVE (battle_util.c:3455-3466): a FLAG_POWDER move is
+  // cancelled outright when IsPowderImmune (battle_util.c:3190-3197) holds --
+  // attacker != target and no Mycelium Might on the attacker are the C's own
+  // entry conditions and isPowderImmune already applies the Mycelium Might
+  // bypass, matching attackCanceller.ts:580. Covers Spore, Sleep Powder,
+  // Stun Spore and Poison Powder.
+  if (session.data.dataContext.move(moveId)?.flags.powderAffected && isPowderImmune(session.state, 0, 1, deps)) {
+    return false
+  }
   switch (effect) {
     case 'EFFECT_TOXIC':
     case 'EFFECT_POISON':
       return canBePoisoned(session.state, 0, 1, moveId, deps)
     case 'EFFECT_WILL_O_WISP':
       return canBeBurned(session.state, 1, 0, deps)
-    case 'EFFECT_PARALYZE':
+    case 'EFFECT_PARALYZE': {
+      // BattleScript_EffectParalyze runs typecalc (:4366) before
+      // requirecandoeffect (:4367), so an Electric-type move on a Ground target
+      // sets MOVE_RESULT_DOESNT_AFFECT_FOE and accuracycheck (:4369) jumps to
+      // BattleScript_ButItFailed (JumpIfMoveFailed,
+      // battle_script_commands.c:1213) -- the same check handleParalyze makes
+      // (moveEffects.ts:2025-2028). The later `setmoveeffect MOVE_EFFECT_PARALYSIS`
+      // (:4372, no ignore-type flag) re-checks CanBeParalyzed
+      // (battle_script_commands.c:2506; battle_util.c:5072-5080), which
+      // canBeParalyzed ports -- keeping it, not the ignore-type variant, is what
+      // stops an Electric target from being reported as paralyzable.
+      const target = session.state.battlers[1]
+      const moveType = (session.data.dataContext.move(moveId)?.type ?? 'TYPE_ELECTRIC').replace(/^TYPE_/, '')
+      if (moveType === 'ELECTRIC' && (target?.mon.types.includes('GROUND') ?? false)) return false
       return canBeParalyzed(session.state, 0, 1, deps)
+    }
     case 'EFFECT_PARALYZE_IGNORE_TYPE':
+      // BattleScript_EffectParalyzeIgnoreType (:4346-4360) keeps
+      // MOVE_EFFECT_IGNORE_TYPE_IMMUNITIES on setmoveeffect and has no typecalc,
+      // so Ground typing does not stop it.
       return canBeParalyzedIgnoreType(session.state, 0, 1, deps)
     case 'EFFECT_SLEEP':
       return canSleep(session.state, 1, 0, deps)
@@ -982,9 +1019,15 @@ function chooseStaller(
   }
 
   // 4. Residual, else damaging. Leech Seed fails on a Grass target or when
-  //    already seeded (handleLeechSeed, battle_scripts_1.s:4579-4590); Curse's
-  //    Ghost branch sets STATUS2_CURSED on a target that lacks it
-  //    (Cmd_cursetarget, battle_script_commands.c:11103-11113).
+  //    already seeded (handleLeechSeed, battle_scripts_1.s:4579-4590); Curse
+  //    takes its Ghost branch when the attacker is Ghost OR fog is effective on
+  //    it (BattleScript_EffectCurse, :4928-4930:
+  //    `jumpiftype BS_ATTACKER, TYPE_GHOST` then
+  //    `jumpifweatheraffected BS_ATTACKER, WEATHER_FOG_ANY`), and that branch
+  //    sets STATUS2_CURSED on a target that lacks it (Cmd_cursetarget,
+  //    battle_script_commands.c:11103-11113). The fog test is the handler's own
+  //    isBattlerWeatherAffected(state, battlerId, WEATHER_FOG_ANY, deps)
+  //    (moveEffects.ts:3806), so Cloud Nine / Air Lock via grounding is respected.
   const target = session.state.battlers[1]
   if (target) {
     const leechSeed = findEffect('EFFECT_LEECH_SEED')
@@ -992,8 +1035,16 @@ function chooseStaller(
       return { choice: leechSeed.choice, tag: 'residual' }
     }
     const curse = findEffect('EFFECT_CURSE')
-    if (curse && mon?.types.includes('GHOST') && (target.mon.status2 & STATUS2_CURSED) === 0) {
-      return { choice: curse.choice, tag: 'residual' }
+    if (curse && (target.mon.status2 & STATUS2_CURSED) === 0) {
+      const ghostCurse =
+        mon?.types.includes('GHOST') ||
+        isBattlerWeatherAffected(
+          session.state,
+          0,
+          WEATHER_FOG_ANY,
+          aiDamageDepsFor(session.data, session.state, session.inverseBattle),
+        )
+      if (ghostCurse) return { choice: curse.choice, tag: 'residual' }
     }
   }
 
