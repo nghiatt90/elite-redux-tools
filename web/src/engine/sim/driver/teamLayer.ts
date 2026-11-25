@@ -15,8 +15,9 @@
 // PP loop keeps a per-layer stall counter plus a latched stop; none of them
 // touch the real RNG. The PP loop also prices each bench candidate's SWITCH-IN
 // on its own clone: entry hazards (`applySwitchInHazards`) and Toxic Terrain
-// chip, plus the queue line's own Toxic Spikes disqualification, so a loop that
-// is free of move damage but not of switching is not counted as free (s20c2bb).
+// chip, and it disqualifies a candidate the sim's hazard port gives a status,
+// so a loop that is free of move damage but not of switching is not counted as
+// free (s20c2bb, s20c2bc).
 //
 // Pure and headless: no React, no I/O. Every game rule cites the C or the data
 // row that fixes it; every threshold a player chose is marked MODEL CHOICE.
@@ -27,7 +28,6 @@ import { doesBattlerHaveAbilityShield } from '../ai/aiAbilityHelpers'
 import {
   DEFAULT_STAT_STAGE,
   SIDE_STATUS_SAFEGUARD,
-  SIDE_STATUS_TOXIC_SPIKES,
   STAT_ATK,
   STATUS1_ANY,
   STATUS1_BURN,
@@ -42,7 +42,6 @@ import {
 } from '../constants'
 import { canBattlerEscape, isAbilityPreventingEscape, type EscapeDeps } from '../escape'
 import { isAbilityOnField, toxicTerrainDamage } from '../fieldEndTurn'
-import { isBattlerGrounded } from '../grounding'
 import { applySwitchInHazards } from '../hazards'
 import type { BattleState, BattlerState } from '../state'
 import { battlerHasSimAbility, isBattlerWeatherAffected } from '../statBuffs'
@@ -935,11 +934,12 @@ function statusLandsOnUs(
  * nobody, so a terrain about to expire adds nothing. A permanent terrain,
  * `started.terrain`, or Stench on the field also suppresses the decrement.
  *
- * Toxic Spikes: not a damage cost but a disqualification -- a grounded
- * non-Poison/non-Steel candidate would leave the switch poisoned, which the
- * loop cannot call free. This is deliberately the queue line's own rule, and
- * it is stricter than the C's `CanBePoisoned` gate (battle_script_commands.c:
- * 8773) for a mon that already has a status1. */
+ * A status: not a damage cost but a disqualification -- if the hazard port gave
+ * a clean (`status1 === 0`) entrant a status, the loop cannot call the switch
+ * free. That is the sim's own Toxic Spikes block
+ * (battle_script_commands.c:8760-8787, absorb and `CanBePoisoned` gates
+ * included), not a re-derivation; a mon that already had a status stays
+ * eligible. */
 function ppLoopSwitchInCost(session: BattleSession, slot: number): number | null {
   const reserve = session.state.sides[0].party[slot]
   if (!reserve || reserve.speciesId === null) return null
@@ -950,17 +950,10 @@ function ppLoopSwitchInCost(session: BattleSession, slot: number): number | null
   const hpBefore = probe.state.battlers[0]?.mon.hp ?? 0
   if (hpBefore <= 0) return null
 
-  const side = session.state.sides[0]
-  if (hasFlag(side.statuses, SIDE_STATUS_TOXIC_SPIKES) && side.timers.toxicSpikesAmount >= 1) {
-    const types: readonly string[] = probe.state.battlers[0]?.mon.types ?? []
-    const grounded = isBattlerGrounded(probe.state, 0, {
-      ...probe.turnDeps.grounding,
-      attackerHasMoldBreaker: false,
-    })
-    if (grounded && !types.includes('POISON') && !types.includes('STEEL')) return null
-  }
-
+  const statusBefore = probe.state.battlers[0]?.mon.status1 ?? 0
   applySwitchInHazards(probe.state, 0, probe.turnDeps, [])
+  const statusAfter = probe.state.battlers[0]?.mon.status1 ?? 0
+  if (statusBefore === 0 && statusAfter !== 0) return null
   const hazardCost = hpBefore - (probe.state.battlers[0]?.mon.hp ?? 0)
 
   const terrainExpires =
@@ -978,8 +971,8 @@ function ppLoopSwitchInCost(session: BattleSession, slot: number): number | null
  * also carries the switch-in cost from `ppLoopSwitchInCost` (hazards and Toxic
  * Terrain) -- and that mon's current HP. Null when they have no usable move (at
  * least one is required), the mon is not alive, any usable move can land a
- * non-volatile status on it (`statusLandsOnUs`), or the bench entry would be
- * disqualified by Toxic Spikes. A null or immune range contributes zero. */
+ * non-volatile status on it (`statusLandsOnUs`), or the sim's hazard port would
+ * give the bench entry a status. A null or immune range contributes zero. */
 function ppLoopIncoming(
   session: BattleSession,
   theirMoves: readonly string[],
@@ -1023,8 +1016,9 @@ function takesLittleOrNothing(incoming: PpLoopIncoming | null): incoming is PpLo
  * and at least one bench slot both qualify, and switches to the qualifying slot
  * whose worst-case fraction of HP is smallest (ties go to the lower slot). A
  * bench slot's worst case includes its switch-in cost (`ppLoopSwitchInCost`:
- * entry hazards and Toxic Terrain, measured on a cloned probe; Toxic Spikes
- * disqualifies outright). The stall tracker (updated on every `policy` call)
+ * entry hazards and Toxic Terrain, measured on a cloned probe; a status the
+ * hazard port gives the entrant disqualifies outright). The stall tracker
+ * (updated on every `policy` call)
  * latches `stopped` once both sides have switched for `PP_LOOP_STALL_LIMIT`
  * turns with no HP or PP change; the latch survives later turns and only a
  * non-consecutive turn clears it. */
