@@ -208,8 +208,12 @@ describe('cycle s20g - support Baton Pass own-boost gate: check 1 (this turn)', 
     // (Fairy) Bullet Punch is 2x: 40..48 non-crit, 61..72 crit, 1/8. At 48 HP
     // Bullet Punch reaches it with its single 48 (7 copies at the 1/8 crit
     // denominator) plus the whole crit row (16) = 23/128 = 17.97%, while
-    // Extreme Speed at 48 is its crit row alone (16/384 = 4.17%), so the
-    // sample is safe and only the priority scan refuses.
+    // Extreme Speed at 48 is its crit row alone (16/384 = 4.17%), so check 1's
+    // predicted-move loop passes. This fixture does NOT isolate the priority
+    // scan: check 2 also refuses, because two Extreme Speeds certainly reach
+    // 48 + 14 = 62 HP (the minimum 36 plus 36 of the second hit), so deleting
+    // the scan leaves the decision unchanged. Test 14 is the fixture where the
+    // scan is the only refusal.
     const indirect = session(supportTeam(['MOVE_CALM_MIND', 'MOVE_BATON_PASS', 'MOVE_MOONBLAST'], 'SPECIES_CLEFABLE'), [
       mon('SPECIES_MACHAMP', ['MOVE_EXTREME_SPEED', 'MOVE_BULLET_PUNCH']),
     ])
@@ -225,6 +229,83 @@ describe('cycle s20g - support Baton Pass own-boost gate: check 1 (this turn)', 
     const predictions = predictAi(indirect, 3, 0)
     expect(predictions.every((sample) => sample.action?.chosenMove?.id === 'MOVE_EXTREME_SPEED')).toBe(true)
     expect(moveId(playTurn(indirect, 'support', {}, memory()))).not.toBe('MOVE_CALM_MIND')
+  })
+
+  it('13. check 2 refuses when a real priority move is still in the slots, even though we outspeed', () => {
+    // Our Snorlax is patched to raw Speed 200 (as in test 1) at 65 HP, so check 1
+    // passes on both loops: Bullet Punch's 24..29 non-crit cannot reach 65 and
+    // only its single 65 crit can, 1 of 128 = 0.78% (test 11's rows), while the
+    // predicted Body Slam is 16/384 = 4.17% (its crit row alone). Check 2 (a)
+    // would hold on speed -- the Baton Pass outspeeds every turn-2 Body Slam
+    // sample -- so only `priorityDamagers(probe).length === 0` fails it, because
+    // Bullet Punch has priority 1. (b) then sees two Body Slams reach
+    // 65 + 14 = 79 HP (the turn-1 forced 45 plus a turn-1 roll a leave 79 - a,
+    // at most 40, above Body Slam's 39 minimum) with 98.6% >= 15% and refuses
+    // the boost. The control drops Bullet Punch and boosts (test 2). At the
+    // 46 HP of test 2 the turn-2 AI switches to Bullet Punch instead (it can
+    // faint us there, so it outspeeds the Baton Pass on priority and the clause
+    // would be moot), which is why this fixture sits at 65.
+    const s = session(supportTeam(CALM_MIND_TEAM), [mon('SPECIES_MACHAMP', ['MOVE_BODY_SLAM', 'MOVE_BULLET_PUNCH'])])
+    patchMon(s.state, 0, 0, { hp: 65 })
+    patchMon(s.state, 0, 0, { rawStats: { ...s.state.battlers[0]!.mon.rawStats, spe: 200 } })
+    const bp = attackRange(s, 'MOVE_BULLET_PUNCH')
+    expect(bp.rolls).toEqual([24, 24, 25, 25, 25, 26, 26, 26, 26, 27, 27, 27, 28, 28, 28, 29])
+    expect(bp.critRolls).toEqual([55, 55, 56, 57, 57, 58, 59, 59, 60, 61, 61, 62, 63, 63, 64, 65])
+    expect(bp.critChanceDenominator).toBe(8)
+    expect(koChance(bp, 65)).toBeCloseTo(1 / 128, 12)
+    const one = attackRange(s, 'MOVE_BODY_SLAM')
+    expect(koChance(one, 65)).toBeCloseTo(16 / 384, 12)
+    expect(twoHitChance(one, one, 65 + 14)).toBeGreaterThan(0.9)
+    expect(predictAi(s, 3, 0).every((sample) => sample.action?.chosenMove?.id === 'MOVE_BODY_SLAM')).toBe(true)
+    expect(moveId(playTurn(s, 'support', {}, memory()))).not.toBe('MOVE_CALM_MIND')
+
+    const control = session(supportTeam(CALM_MIND_TEAM), [mon('SPECIES_MACHAMP', ['MOVE_BODY_SLAM'])])
+    patchMon(control.state, 0, 0, { hp: 46 })
+    patchMon(control.state, 0, 0, { rawStats: { ...control.state.battlers[0]!.mon.rawStats, spe: 200 } })
+    expect(moveId(playTurn(control, 'support', {}, memory()))).toBe('MOVE_CALM_MIND')
+  })
+
+  it('14. check 2 passes and only check 1\'s priority scan refuses', () => {
+    // Super Luck raises Bullet Punch's crit stage to a 1/2 denominator
+    // (abilities/impl/04-crit-a.ts; pinned below), which separates the AI's
+    // blended estimate from the tail: aiCalcDamage weighs the 65 max crit once
+    // against the 29 max non-crit once, (65 + 29) / 2 = 47 < 52 HP, so the AI
+    // sees no faint and Bullet Punch scores 101. Our team carries a physical
+    // (Body Slam) and a special (Shadow Ball) move, so both screens pass
+    // ShouldSetScreen (battle_ai_util.c:2247-2266) and score 104-105; the AI
+    // predicts a SCREEN on every turn-1 sample and, because turn 1 sets one of
+    // them in the probe, the other screen on turn 2. That makes check 2 pass:
+    // a status move deals 0 (aiDamageRolls is null), so the two-hit clause is
+    // 0%, and (a) is already blocked by Bullet Punch's priority. Check 1's
+    // priority scan, however, sees the whole 1/2 crit row at 52 HP: 50% >= 15%,
+    // and refuses. Delete the scan and this fixture boosts. (If a turn-2 sample
+    // were Bullet Punch instead, its two hits would reach 52 + 14 = 66 with
+    // 1 - (1/2)^2 = 75%, and check 2 would refuse on its own.)
+    const s = session(
+      supportTeam(['MOVE_CALM_MIND', 'MOVE_BATON_PASS', 'MOVE_BODY_SLAM', 'MOVE_SHADOW_BALL']),
+      [
+        mon('SPECIES_MACHAMP', ['MOVE_BULLET_PUNCH', 'MOVE_REFLECT', 'MOVE_LIGHT_SCREEN'], {
+          ability: 'ABILITY_SUPER_LUCK',
+        }),
+      ],
+      { preferStatus: true },
+    )
+    patchMon(s.state, 0, 0, { hp: 52 })
+    patchMon(s.state, 0, 0, { rawStats: { ...s.state.battlers[0]!.mon.rawStats, spe: 200 } })
+    const bp = attackRange(s, 'MOVE_BULLET_PUNCH')
+    expect(bp.rolls).toEqual([24, 24, 25, 25, 25, 26, 26, 26, 26, 27, 27, 27, 28, 28, 28, 29])
+    expect(bp.critRolls).toEqual([55, 55, 56, 57, 57, 58, 59, 59, 60, 61, 61, 62, 63, 63, 64, 65])
+    expect(bp.critChanceDenominator).toBe(2)
+    expect(koChance(bp, 52)).toBeCloseTo(0.5, 12)
+    const samples = predictAi(s, 3, 0)
+    const predicted = samples.map((sample) => sample.action?.chosenMove?.id)
+    expect(predicted.every((id) => id === 'MOVE_REFLECT' || id === 'MOVE_LIGHT_SCREEN')).toBe(true)
+    const deps = aiDamageDepsFor(data, s.state, s.inverseBattle)
+    for (const id of predicted) expect(aiDamageRolls(s.state, id!, 1, 0, deps)).toBeNull()
+    // Check 2's two-hit clause on a status sample: both hits deal 0, so even
+    // the probe's healed 66 HP is unreachable.
+    expect(calcKoChances([0], 66, 1)[0]?.probability ?? 0).toBe(0)
+    expect(moveId(playTurn(s, 'support', {}, memory()))).not.toBe('MOVE_CALM_MIND')
   })
 })
 
@@ -343,6 +424,36 @@ describe('cycle s20g - support Baton Pass own-boost gate: check 2 (the turn-2 cl
     expect(predictions.map((sample) => sample.action?.action)).toEqual(['SWITCH', 'SWITCH', 'SWITCH'])
     expect(predictions.map((sample) => sample.switchSlot)).toEqual([1, 1, 1])
     expect(moveId(playTurn(s, 'support', {}, memory()))).toBe('MOVE_CALM_MIND')
+  })
+
+  it('12. a follow-up attack queued by the opponent\'s own move counts in the probe, so the clone refuses where a plain ability boosts', () => {
+    // Sludge Spit (abilities.cc:10674-10681) queues Venom Bolt at fixed base power
+    // 35 after the holder's damaging move (UseAttackerFollowUpMove,
+    // battle_util.c:4021-4033; moveEnd.ts:1454-1470) with FOLLOWUP_STANDARD, so it
+    // hits us back. Venom Bolt is PHYSICAL (moves.json), Poison, neutral against
+    // Normal and no STAB from Fighting Machamp, so scaling Body Slam's aiDamageRolls
+    // pins above (39..46 non-crit at base power 85) to 35 BP gives about 19 at the
+    // top non-crit roll; running this fixture at 220 HP across seeds 0..31, the
+    // follow-up takes 17, 18 or 19 HP, and 37, 38, 39, 40 or 43 on its 1/8 crit
+    // (MOVE_VENOM_BOLT declares `crit: HIGH`, the same stage as Bullet Punch).
+    // At 91 HP the predicted-turn probe forces v = 45, then the follow-up's crit
+    // of 43 (probe seed 0) and the Self-Sufficient heal of 14 leave
+    // 91 - 45 - 43 + 14 = 17 HP, so a second Body Slam (minimum 39) always KOs
+    // and the boost is refused. Before the fix the wrapper zeroed that
+    // follow-up: the probe sat at 91 - 45 + 14 = 60, only a crit reached it
+    // (1/24 = 4.17% < 15%) and Swords Dance was allowed. Guts is the control:
+    // same fixture, no follow-up, boost.
+    const control = session(supportTeam(SWORDS_DANCE_TEAM), [mon('SPECIES_MACHAMP', ['MOVE_BODY_SLAM'])])
+    patchMon(control.state, 0, 0, { hp: 91 })
+    expect(moveId(playTurn(control, 'support', {}, memory()))).toBe('MOVE_SWORDS_DANCE')
+
+    const s = session(supportTeam(SWORDS_DANCE_TEAM), [
+      mon('SPECIES_MACHAMP', ['MOVE_BODY_SLAM'], { ability: 'ABILITY_SLUDGE_SPIT' }),
+    ])
+    patchMon(s.state, 0, 0, { hp: 91 })
+    expect(attackRange(s, 'MOVE_BODY_SLAM').rolls).toEqual(BODY_SLAM_ROLLS)
+    expect(attackRange(s, 'MOVE_BODY_SLAM').critRolls).toEqual(BODY_SLAM_CRITS)
+    expect(moveId(playTurn(s, 'support', {}, memory()))).not.toBe('MOVE_SWORDS_DANCE')
   })
 })
 

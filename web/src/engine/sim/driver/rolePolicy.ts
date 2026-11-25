@@ -1490,8 +1490,10 @@ function highestProbableDamage(distribution: number[]): number {
 
 /** Steps one clone of the session for turn 1 with the predicted move's first
  * hit forced to `v` (later hits of a multi-hit move to 0), then reports
- * whether the wrapper saw the predicted hit at all. Everything else -- Sturdy,
- * Focus Sash, secondaries, end of turn -- is the sim's own. */
+ * whether the wrapper saw the predicted hit at all. Queued extra attacks and the
+ * end-of-turn Future Sight hit (state.processingExtraAttacks) keep the sim's own
+ * damage. Everything else -- Sturdy, Focus Sash, secondaries, end of turn -- is
+ * the sim's own. */
 function buildProbeTurn(
   session: BattleSession,
   boost: MoveChoiceInfo,
@@ -1507,7 +1509,7 @@ function buildProbeTurn(
     ...original,
     resolve(state, attackerId, targetId, action, context) {
       const resolution = original.resolve(state, attackerId, targetId, action, context)
-      if (attackerId !== 1 || targetId !== 0) return resolution
+      if (attackerId !== 1 || targetId !== 0 || state.processingExtraAttacks) return resolution
       sawTargetCall = true
       if (resolution.targetDamage === null || resolution.targetDamage <= 0) return resolution
       const targetDamage = firstHitReplaced ? 0 : v
