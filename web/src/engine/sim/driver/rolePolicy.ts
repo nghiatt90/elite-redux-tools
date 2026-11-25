@@ -18,6 +18,7 @@ import { aiDamageRolls } from '../ai/aiCalcDamage'
 import {
   DEFAULT_STAT_STAGE,
   MAX_STAT_STAGE,
+  MIN_STAT_STAGE,
   SIDE_STATUS_AURORA_VEIL,
   SIDE_STATUS_LIGHTSCREEN,
   SIDE_STATUS_REFLECT,
@@ -29,8 +30,10 @@ import {
   STAT_SPDEF,
   STAT_SPEED,
   STATUS1_ANY,
+  STATUS1_BLEED,
   STATUS1_BURN,
   STATUS1_POISON_ANY,
+  STATUS1_SLEEP,
   STATUS2_CURSED,
   STATUS2_NIGHTMARE,
   STATUS2_SUBSTITUTE,
@@ -48,15 +51,20 @@ import {
   WEATHER_SANDSTORM_ANY,
   WEATHER_SUN_ANY,
 } from '../constants'
+import { isHealingBlocked } from '../endTurn'
 import { weatherHasEffect } from '../fieldEndTurn'
-import type { BattleState, SimBattleMon, SimPartyMon } from '../state'
+import type { BattleState, BattlerState, SimBattleMon, SimPartyMon } from '../state'
 import { battlerHasSimAbility, isBattlerWeatherAffected } from '../statBuffs'
 import {
+  CHECK_SLEEP,
   canBeBurned,
   canBeParalyzed,
   canBeParalyzedIgnoreType,
   canBePoisoned,
   canSleep,
+  doesSubstituteBlockMove,
+  isAbilityStatusProtected,
+  isBattlerTerrainAffected,
   isPowderImmune,
 } from '../statusEffects'
 import { buildTurnOrderContext } from '../turn'
@@ -588,6 +596,120 @@ export function statusMoveWorks(session: BattleSession, moveId: string, effect: 
   }
 }
 
+/** Move effects that recover HP directly on the user, gated by chooseStaller rule 2. */
+export const RECOVERY_EFFECTS: ReadonlySet<string> = new Set([
+  'EFFECT_RESTORE_HP',
+  'EFFECT_SOFTBOILED',
+  'EFFECT_ROOST',
+  'EFFECT_MORNING_SUN',
+  'EFFECT_SYNTHESIS',
+  'EFFECT_MOONLIGHT',
+  'EFFECT_SHORE_UP',
+  'EFFECT_REST',
+  'EFFECT_STRENGTH_SAP',
+  'EFFECT_JUNGLE_HEALING',
+])
+
+/**
+ * Whether a recovery move's healing effect would succeed and heal battler 0
+ * (chooseStaller rule 2).
+ *
+ * 1. EFFECT_RESTORE_HP (battle_scripts_1.s:3940-3955) and EFFECT_SOFTBOILED (:5909-5924):
+ *    `jumpifhealingblocked` fails the move. Usable unless `isHealingBlocked`.
+ *    A bleeding user cures the bleed on execution, so isHealingBlocked's STATUS1_BLEED
+ *    strip allows it.
+ * 2. EFFECT_ROOST (:2736-2742): MODEL CHOICE: the script does not fail, but
+ *    `Cmd_tryhealhalfhealth` (battle_script_commands.c:9255-9274) zeroes the heal when
+ *    `!CanBattlerHeal`, so a blocked Roost would repeat for nothing; same gate as 1.
+ * 3. EFFECT_MORNING_SUN, SYNTHESIS, MOONLIGHT, SHORE_UP (:5495-5503):
+ *    `Cmd_recoverbasedonsunlight` (battle_script_commands.c:11433-11462) fails only at
+ *    full HP and has no heal-block check. Usable below max HP.
+ * 4. EFFECT_REST (:4023-4036, Cmd_trysetrest :9415-9437, handleRest):
+ *    Not usable when asleep, has Comatose, ability-protected from sleep (CHECK_SLEEP),
+ *    or on Electric or Misty Terrain.
+ * 5. EFFECT_STRENGTH_SAP (:896-945, handleStrengthSap):
+ *    Not usable when substitute blocks or target's Attack stage is MIN_STAT_STAGE.
+ * 6. EFFECT_JUNGLE_HEALING (:773-804, handleJungleHealing):
+ *    Not usable when healing is blocked. Additionally MOVE_LIFE_DEW is not usable
+ *    while bleeding (heals nothing under bleed and skips status cure, :791).
+ */
+export function recoveryMoveWorks(
+  session: BattleSession,
+  moveId: string,
+  effect: string,
+  battler: BattlerState = session.state.battlers[0]!,
+  deps = aiDamageDepsFor(session.data, session.state, session.inverseBattle),
+): boolean {
+  if (!battler) return false
+  switch (effect) {
+    case 'EFFECT_RESTORE_HP':
+    case 'EFFECT_SOFTBOILED':
+    case 'EFFECT_ROOST':
+      // BattleScript_EffectRestoreHp (battle_scripts_1.s:3940-3955) and Softboiled
+      // (:5909-5924) fail via jumpifhealingblocked.
+      // MODEL CHOICE: BattleScript_EffectRoost (:2736-2742) does not fail when
+      // healing is blocked, but Cmd_tryhealhalfhealth (battle_script_commands.c:9255-9274)
+      // zeroes the heal when !CanBattlerHeal, so a blocked Roost would repeat for nothing.
+      return !isHealingBlocked(session.state, 0, battler, [], session.data.dataContext)
+
+    case 'EFFECT_MORNING_SUN':
+    case 'EFFECT_SYNTHESIS':
+    case 'EFFECT_MOONLIGHT':
+    case 'EFFECT_SHORE_UP':
+      // BattleScript_EffectMorningSun / Synthesis / Moonlight / ShoreUp (:5495-5503)
+      // -> Cmd_recoverbasedonsunlight (battle_script_commands.c:11433-11462) fails
+      // only at full HP and has no heal-block check. Usable below max HP.
+      return true
+
+    case 'EFFECT_REST':
+      // BattleScript_EffectRest (:4023-4036), Cmd_trysetrest (battle_script_commands.c:9415-9437),
+      // sim handleRest (moveEffects.ts:5030): fails when already asleep, has Comatose,
+      // ability-protected from sleep, or on Electric or Misty Terrain.
+      if ((battler.mon.status1 & STATUS1_SLEEP) !== 0) return false
+      if (battlerHasSimAbility(session.state, battler, 'ABILITY_COMATOSE', false, 0, false, session.data.dataContext)) {
+        return false
+      }
+      if (isAbilityStatusProtected(session.state, 0, CHECK_SLEEP, 0, deps) !== null) {
+        return false
+      }
+      if (isBattlerTerrainAffected(session.state, 0, STATUS_FIELD_ELECTRIC_TERRAIN, deps)) {
+        return false
+      }
+      if (isBattlerTerrainAffected(session.state, 0, STATUS_FIELD_MISTY_TERRAIN, deps)) {
+        return false
+      }
+      return true
+
+    case 'EFFECT_STRENGTH_SAP':
+      // BattleScript_EffectStrengthSap (:896-945), sim handleStrengthSap: fails when
+      // blocked by substitute (:898) or target's Attack stage is MIN_STAT_STAGE (:903-908,
+      // where the script falls through without healing).
+      if (doesSubstituteBlockMove(session.state, 0, 1, moveId, deps)) {
+        return false
+      }
+      if ((session.state.battlers[1]?.mon.statStages[STAT_ATK] ?? DEFAULT_STAT_STAGE) === MIN_STAT_STAGE) {
+        return false
+      }
+      return true
+
+    case 'EFFECT_JUNGLE_HEALING':
+      // BattleScript_EffectJungleHealing (:773-804), sim handleJungleHealing:
+      // not usable when healing is blocked. Additionally Life Dew (script :791)
+      // skips status cure and heals nothing under bleed, so it is unusable while bleeding.
+      // Jungle Healing and Lunar Blessing cure the bleed, so they stay usable.
+      if (isHealingBlocked(session.state, 0, battler, [], session.data.dataContext)) {
+        return false
+      }
+      if (moveId === 'MOVE_LIFE_DEW' && (battler.mon.status1 & STATUS1_BLEED) !== 0) {
+        return false
+      }
+      return true
+
+    default:
+      return false
+  }
+}
+
 /** A protection move as ProtectSucceeds / Cmd_setprotectlike read it
  * (battle_script_commands.c:6649-6655, PROTECT_SUCCESS_RATES :727): the
  * moves.json `isProtection` flag, effect EFFECT_PROTECT, priority +4 and a
@@ -606,13 +728,14 @@ function isProtectionMove(session: BattleSession, moveId: string): boolean {
 }
 
 /** ProtectSucceeds's "the previous move was a protection move" test
- * (battle_script_commands.c:6649-6655): the C reads `gLastResultingMoves` and
- * the flag; the policy reads the caller's memory. `protectUses > 0` is the
- * battle state's own record that a protect already succeeded. */
+ * (battle_script_commands.c:6649-6655): matches the sim's `handleProtect`
+ * by reading `battlers[0].lastMove` (falling back to memory.lastMove when null)
+ * and testing the `isProtection` flag. */
 function usedProtectionLastTurn(session: BattleSession, memory: RoleMemory): boolean {
-  if ((session.state.battlers[0]?.volatiles.protectUses ?? 0) > 0) return true
-  if (!memory.lastMove) return false
-  return session.data.dataContext.move(memory.lastMove)?.flags.isProtection === true
+  const battlerLastMove = session.state.battlers[0]?.lastMove ?? null
+  const lastMove = battlerLastMove !== null ? battlerLastMove : memory.lastMove
+  if (!lastMove) return false
+  return session.data.dataContext.move(lastMove)?.flags.isProtection === true
 }
 
 /** Residual damage ticking on the opponent's active mon (decision 14):
@@ -991,12 +1114,29 @@ function chooseStaller(
   }
 
   // 2. Heal below the threshold.
-  const mon = session.state.battlers[0]?.mon
+  const battler = session.state.battlers[0]
+  const mon = battler?.mon
   const healThreshold = params.healThreshold ?? DEFAULT_HEAL_THRESHOLD
-  if (mon && mon.hp * 100 < healThreshold * mon.maxHp) {
-    // Direct recovery: BattleScript_EffectRestoreHp, battle_scripts_1.s:3940-3955.
-    const recovery = findEffect('EFFECT_RESTORE_HP')
-    if (recovery) return { choice: recovery.choice, tag: 'heal' }
+  if (battler && mon && mon.hp * 100 < healThreshold * mon.maxHp) {
+    const deps = aiDamageDepsFor(session.data, session.state, session.inverseBattle)
+    let restChoice: MoveChoiceInfo | undefined
+    for (const info of moves) {
+      if (!info.moveId) continue
+      const effect = session.data.dataContext.move(info.moveId)?.effect ?? null
+      if (!effect || !RECOVERY_EFFECTS.has(effect) || !recoveryMoveWorks(session, info.moveId, effect, battler, deps)) {
+        continue
+      }
+      if (effect === 'EFFECT_REST') {
+        // MODEL CHOICE: Rest puts the user to sleep for 3 turns, so choose it
+        // only when no other usable recovery move exists.
+        if (!restChoice) restChoice = info
+      } else {
+        return { choice: info.choice, tag: 'heal' }
+      }
+    }
+    if (restChoice) {
+      return { choice: restChoice.choice, tag: 'heal' }
+    }
     // Wish: BattleScript_EffectWish, :6306-6313. Cmd_trywish case 0 fails
     // while wishCounter != 0 (battle_script_commands.c:11784-11793).
     const wish = findEffect('EFFECT_WISH')

@@ -317,9 +317,10 @@ describe('cycle 946 - staller: Protect', () => {
     expect(trace[0]!.tags).toEqual(['staller', 'protect'])
   })
 
-  it('does not Protect twice: memory.lastMove and protectUses both block it', () => {
-    // ProtectSucceeds (battle_script_commands.c:6649-6655) resets/uses
-    // protectUses, so a second consecutive Protect is not the plan.
+  it('does not Protect twice: memory.lastMove and battlers[0].lastMove block it', () => {
+    // ProtectSucceeds (battle_script_commands.c:6649-6655) checks whether the
+    // last move was a protection move; usedProtectionLastTurn reads
+    // battlers[0].lastMove (falling back to memory.lastMove when null).
     const viaMemory = session(playerOne(['MOVE_PROTECT', 'MOVE_BODY_SLAM']), [
       mon('SPECIES_MACHAMP', ['MOVE_CELEBRATE']),
     ])
@@ -331,7 +332,15 @@ describe('cycle 946 - staller: Protect', () => {
     const viaUses = session(playerOne(['MOVE_PROTECT', 'MOVE_BODY_SLAM']), [mon('SPECIES_MACHAMP', ['MOVE_CELEBRATE'])])
     patchMon(viaUses.state, 1, 0, { status1: STATUS1_BURN })
     viaUses.state.battlers[0]!.volatiles.protectUses = 1
-    expect(moveId(chooseRoleAction(viaUses, 'staller', {}, memory()))).toBe('MOVE_BODY_SLAM')
+    viaUses.state.battlers[0]!.lastMove = 'MOVE_BODY_SLAM'
+    expect(moveId(chooseRoleAction(viaUses, 'staller', {}, { turn: 1, lastMove: 'MOVE_PROTECT' }))).toBe('MOVE_PROTECT')
+
+    const viaBattlerLastMove = session(playerOne(['MOVE_PROTECT', 'MOVE_BODY_SLAM']), [
+      mon('SPECIES_MACHAMP', ['MOVE_CELEBRATE']),
+    ])
+    patchMon(viaBattlerLastMove.state, 1, 0, { status1: STATUS1_BURN })
+    viaBattlerLastMove.state.battlers[0]!.lastMove = 'MOVE_PROTECT'
+    expect(moveId(chooseRoleAction(viaBattlerLastMove, 'staller', {}, memory()))).toBe('MOVE_BODY_SLAM')
   })
 
   it('does not treat an EFFECT_PROTECT move without the isProtection flag as Protect', () => {
