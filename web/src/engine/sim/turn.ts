@@ -127,7 +127,7 @@
 
 import type { BattleOutcome, BattleState, BattlerState, ExtraAttackAction, SimPartyMon } from './state'
 import type { ChosenAction, TurnOrderContext, TurnOrder, TurnOrderMoveView } from './turnOrder'
-import { recalculateMoveOrder, setActionsAndBattlersTurnOrder, naturalGiftPriority } from './turnOrder'
+import { getMovePriority, recalculateMoveOrder, setActionsAndBattlersTurnOrder, naturalGiftPriority } from './turnOrder'
 import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
 import type { SimDataContext, SimMoveData } from './dataContext'
@@ -136,11 +136,17 @@ import { buildAccuracyInputs, tryAnticipationMiss } from './accuracyBridge'
 import { getTotalAccuracy } from './accuracy'
 export { buildAccuracyInputs, getTotalAccuracy }
 import { applyModifier } from '../fixed'
-import { getParentalBondMultiplier, resolveEffectiveMoveType } from '../abilities/dispatchCalc'
+import {
+  computeAbsorbingAbility,
+  computeAttackerHasMoldBreaker,
+  computeIsImmune,
+  getParentalBondMultiplier,
+  resolveEffectiveMoveType,
+} from '../abilities/dispatchCalc'
 import { isUnmodelledBasePowerNote, weatherBallType } from '../basePower'
 import { isUnmodelled, type ParentalBondTrigger } from '../abilities/types'
 import { lookupAbility } from '../abilities/registry'
-import { battlerHasAbility } from '../abilities/dispatch'
+import { battlerHasAbility, type AbilitySlots } from '../abilities/dispatch'
 import type { CancelReason } from './attackCanceller'
 import { runAttackCanceller } from './attackCanceller'
 import { clearBattlerLastTakenMove, createFieldBeganThisTurn, createRoundState, createSideBeganThisTurn, createTurnState, createVolatileBeganThisTurn } from './create'
@@ -999,7 +1005,7 @@ export function blocksPrankster(
   battlerPranksterId: number,
   battlerDefId: number,
   checkTarget: boolean,
-  deps: TurnLoopDeps,
+  deps: { dataContext: SimDataContext },
 ): boolean {
   // battle_util.c:8623-8628
   if (state.processingExtraAttacks) {
@@ -1022,6 +1028,166 @@ export function blocksPrankster(
   if (hasFlag(defBattler.statuses3, STATUS3_SEMI_INVULNERABLE)) return false
 
   return true
+}
+
+export type StatusBlockDeps = {
+  dataContext: SimDataContext
+  grounding: GroundingContext
+  damage?: {
+    moveType?: (state: BattleState, attackerId: number, targetId: number, moveId: string) => { moveType: string | null }
+  }
+}
+
+/**
+ * Extracts ability slots unsuppressed by Gastro Acid / Neutralizing Gas.
+ * checkMoldBreaker stays false here because computeIsImmune / computeAbsorbingAbility
+ * handles Mold Breaker itself.
+ */
+function getUnsuppressedSlots(
+  state: BattleState,
+  battler: BattlerState,
+  attackerId: number,
+  dataContext: SimDataContext,
+): AbilitySlots {
+  const live = (id: string | null): string | null =>
+    id && !isSimAbilitySuppressed(state, battler, id, false, attackerId, false, dataContext) ? id : null
+  return {
+    ability: live(battler.mon.abilities.ability),
+    innates: [
+      live(battler.mon.abilities.innates[0]),
+      live(battler.mon.abilities.innates[1]),
+      live(battler.mon.abilities.innates[2]),
+    ],
+  }
+}
+
+/**
+ * TestImmunityAbilities (src/battle_util.c:8953-8977) and Cmd_attackcanceler (:1093-1097).
+ * Evaluates ability immunity and Prankster block for status moves.
+ */
+export function blocksStatusMove(
+  state: BattleState,
+  attackerId: number,
+  targetId: number,
+  moveId: string,
+  deps: StatusBlockDeps,
+): boolean {
+  const attackerBattler = state.battlers[attackerId]
+  const targetBattler = state.battlers[targetId]
+  if (!attackerBattler || !targetBattler) return false
+
+  const moveData = deps.dataContext.move(moveId)
+  if (moveData?.split !== 'STATUS') return false
+
+  const isSelfTarget = targetId === attackerId || moveData.target === 'USER'
+
+  const resolvedType =
+    (deps.damage?.moveType ? deps.damage.moveType(state, attackerId, targetId, moveId).moveType : null) ??
+    moveData.type ??
+    'NORMAL'
+
+  const attackerUnsuppressedSlots = getUnsuppressedSlots(state, attackerBattler, attackerId, deps.dataContext)
+  const attackerHasMoldBreaker =
+    Boolean(moveData.flags?.ignoresAbility) ||
+    computeAttackerHasMoldBreaker(attackerUnsuppressedSlots, moveId, 'STATUS', resolvedType) ||
+    attackerHasMoldBreakerActive(attackerBattler, deps)
+
+  // Attacker-held Radiance (abilities.cc:5545-5551): APPLY_ON_ANY, blocks DARK status moves
+  // on any target including the user's own (e.g. Nasty Plot). Attacker cannot mold-break itself.
+  if (resolvedType === 'DARK' && battlerHasAbility(attackerUnsuppressedSlots, 'ABILITY_RADIANCE', () => false)) {
+    return true
+  }
+
+  const targetUnsuppressedSlots = getUnsuppressedSlots(state, targetBattler, attackerId, deps.dataContext)
+
+  // When not self-targeting, run the full ability immunity scan on the target
+  if (!isSelfTarget) {
+    let movePriority = 0
+    if (!state.processingExtraAttacks) {
+      const moveView = buildMoveView(moveId, deps, state, attackerId)
+      movePriority = getMovePriority(state, attackerId, moveView, targetId)
+    }
+
+    const weather = weatherFromBitfield(state.field.weather).weather
+
+    if (
+      computeIsImmune(
+        targetUnsuppressedSlots,
+        attackerUnsuppressedSlots,
+        {
+          moveType: resolvedType,
+          declaredMoveType: moveData.type ?? 'NORMAL',
+          moveFlags: moveData.flags ?? {},
+          moveSplit: 'STATUS',
+          weather,
+          movePriority,
+        },
+        attackerHasMoldBreaker,
+      )
+    ) {
+      return true
+    }
+  }
+
+  // Prankster check with Magic Bounce exception (battle_util.c:8970-8975):
+  // !(FLAG_MAGIC_COAT_AFFECTED && !gRoundStructs[attacker].usesBouncedMove && BATTLER_HAS_ABILITY(battler, ABILITY_MAGIC_BOUNCE))
+  const targetHasMagicBounce = battlerHasSimAbility(
+    state,
+    targetBattler,
+    'ABILITY_MAGIC_BOUNCE',
+    true,
+    attackerId,
+    attackerHasMoldBreaker,
+    deps.dataContext,
+  )
+  const isMagicBounceExempt =
+    Boolean(moveData.flags?.magicCoatAffected) &&
+    !attackerBattler.round.usesBouncedMove &&
+    targetHasMagicBounce
+
+  if (!isMagicBounceExempt && blocksPrankster(state, moveId, attackerId, targetId, true, deps)) {
+    return true
+  }
+
+  return false
+}
+
+/**
+ * TestAbsorbingAbilities (src/battle_util.c:8935-8942) / Cmd_accuracycheck (:1445-1447).
+ * Returns the ability id that absorbs this status move, or null.
+ */
+export function getStatusMoveAbsorbingAbility(
+  state: BattleState,
+  attackerId: number,
+  targetId: number,
+  moveId: string,
+  deps: StatusBlockDeps,
+): string | null {
+  const attackerBattler = state.battlers[attackerId]
+  const targetBattler = state.battlers[targetId]
+  if (!attackerBattler || !targetBattler) return null
+
+  const moveData = deps.dataContext.move(moveId)
+  if (!moveData) return null
+
+  const resolvedMoveType =
+    (deps.damage?.moveType ? deps.damage.moveType(state, attackerId, targetId, moveId).moveType : null) ??
+    moveData.type ??
+    'NORMAL'
+
+  const attackerUnsuppressedSlots = getUnsuppressedSlots(state, attackerBattler, attackerId, deps.dataContext)
+  const attackerHasMoldBreaker =
+    Boolean(moveData.flags?.ignoresAbility) ||
+    computeAttackerHasMoldBreaker(attackerUnsuppressedSlots, moveId, moveData.split ?? 'STATUS', resolvedMoveType) ||
+    attackerHasMoldBreakerActive(attackerBattler, deps)
+
+  const targetUnsuppressedSlots = getUnsuppressedSlots(state, targetBattler, attackerId, deps.dataContext)
+
+  return computeAbsorbingAbility(
+    targetUnsuppressedSlots,
+    { moveType: resolvedMoveType, moveFlags: moveData.flags ?? {} },
+    attackerHasMoldBreaker,
+  )
 }
 
 /**
@@ -2846,6 +3012,44 @@ export function executeAction(
     const moveData = deps.dataContext.move(currentMove.id)
     const moveFlags = moveData?.flags
 
+    // Cmd_attackcanceler: AbilityBattleEffects(ABILITYEFFECT_MOVES_BLOCK, ...) (src/battle_script_commands.c:1093-1097)
+    if (currentMove.split === 'STATUS' && currentTargetId !== null) {
+      if (blocksStatusMove(state, battlerId, currentTargetId, currentMove.id, deps)) {
+        performPpDeduct()
+        cancelMultiTurnMoves(attackerBattler, state)
+        attackerBattler.round.attackCancelled = true
+        runMoveEndBookkeeping({
+          state,
+          attackerId: battlerId,
+          targetId: currentTargetId,
+          currentMoveId: currentMove.id,
+          chosenMoveId: currentChosenMoveId,
+          deps,
+          noEffect: true,
+          moveFailed: true,
+          obeys: true,
+          fainted: [],
+        })
+        return {
+          turnOrderIndex: index,
+          battlerId,
+          action: actionKind,
+          skippedBecauseFainted: false,
+          battleOver: false,
+          missed: true,
+          targetId: currentTargetId,
+          targetDamage: null,
+          attackerDamage: null,
+          cancelledBy: null,
+          confusionSelfHitDamage: null,
+          statChanges: null,
+          statusApplied: null,
+          unmodelled,
+          fainted: [],
+        }
+      }
+    }
+
     // Cmd_attackcanceler: Magic Coat bounce, src/battle_script_commands.c:1153-1173,
     // and BattleScript_MagicCoatBounce / BattleScript_MagicCoatBouncePrankster (data/battle_scripts_1.s:8325-8344)
     if (moveFlags?.magicCoatAffected && !state.battlers[battlerId]?.round.usesBouncedMove) {
@@ -2907,6 +3111,39 @@ export function executeAction(
         const bounceTargetId = isAffectedByFollowMe(state, bounceAttackerId, bounceDefSide, currentMove.id, deps)
           ? state.sides[bounceDefSide].timers.followmeTarget
           : battlerId
+
+        // Magic Coat bounce re-enters attackcanceler (:8325-8333): check MOVES_BLOCK on reflected move
+        if (blocksStatusMove(state, bounceAttackerId, bounceTargetId, currentMove.id, deps)) {
+          runMoveEndBookkeeping({
+            state,
+            attackerId: bounceAttackerId,
+            targetId: bounceTargetId,
+            currentMoveId: currentMove.id,
+            chosenMoveId: currentChosenMoveId,
+            deps,
+            noEffect: true,
+            moveFailed: true,
+            obeys: true,
+            fainted: [],
+          })
+          return {
+            turnOrderIndex: index,
+            battlerId,
+            action: actionKind,
+            skippedBecauseFainted: false,
+            battleOver: false,
+            missed: true,
+            targetId: bounceTargetId,
+            targetDamage: null,
+            attackerDamage: null,
+            cancelledBy: null,
+            confusionSelfHitDamage: null,
+            statChanges: null,
+            statusApplied: null,
+            unmodelled,
+            fainted: [],
+          }
+        }
 
         const bouncedMoveEffect = currentMove.effect ?? moveData?.effect ?? null
         const bouncedHandler = getMoveEffectHandler(bouncedMoveEffect)
@@ -5047,7 +5284,7 @@ export function executeAction(
 
 function buildMoveView(
   id: string,
-  deps: TurnLoopDeps,
+  deps: StatusBlockDeps,
   state: BattleState,
   battlerId: number,
   attackerItemId: string | null = null,
@@ -5058,7 +5295,7 @@ function buildMoveView(
   // field only), and a locked/called/extra view is built before a target is fixed, so
   // the opposing battler is passed only to satisfy the resolver's signature.
   const resolvedMoveType =
-    deps.damage.moveType && state.battlers[battlerId]
+    deps.damage?.moveType && state.battlers[battlerId]
       ? deps.damage.moveType(state, battlerId, battlerId ^ 1, id).moveType
       : null
   return {

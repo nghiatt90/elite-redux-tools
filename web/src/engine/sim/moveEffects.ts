@@ -7,7 +7,18 @@
 import type { BattleState, BattlerState, QueuedSwitchAction } from './state'
 import type { ChosenAction, TurnOrder } from './turnOrder'
 import type { ActionOutcome, StatChangeOutcome, StatusAppliedOutcome, TurnLoopDeps } from './turn'
-import { blocksPrankster, buildAccuracyInputs, getMoveTarget, getTotalAccuracy, isBattlerAlive, isBattlerProtected, performSwitchAction, ProtectType } from './turn'
+import {
+  blocksPrankster,
+  buildAccuracyInputs,
+  getMoveTarget,
+  getStatusMoveAbsorbingAbility,
+  getTotalAccuracy,
+  isBattlerAlive,
+  isBattlerProtected,
+  performSwitchAction,
+  ProtectType,
+} from './turn'
+import { applyAbsorbEffect } from './absorb'
 import { tryAnticipationMiss } from './accuracyBridge'
 import { gapsToUnmodelled } from './bridge'
 import { hasLiveReserve } from './switchIn'
@@ -424,7 +435,25 @@ function checkAccuracy(
   // :1427-1432 -- Anticipation fires BEFORE the roll and, being an `else if` in
   // the C, consumes no Random() draw when it does.
   if (tryAnticipationMiss(state, battlerId, targetId, moveId, accResult.accuracy, deps, unmodelled)) return true
-  return state.rng.random16() % 100 >= accResult.accuracy
+  const missed = state.rng.random16() % 100 >= accResult.accuracy
+  if (missed) return true
+
+  // ABILITYEFFECT_ABSORBING (src/battle_script_commands.c:1212-1227 / src/battle_util.c:4422-4482)
+  const absorbingAbility = getStatusMoveAbsorbingAbility(state, battlerId, targetId, moveId, deps)
+  if (absorbingAbility) {
+    applyAbsorbEffect({
+      state,
+      attackerId: battlerId,
+      targetId,
+      absorbingAbility,
+      moveId,
+      deps,
+      unmodelled,
+    })
+    return true
+  }
+
+  return false
 }
 
 /** Helper for plain EFFECT_*_UP and EFFECT_*_UP_2/3 using BattleScript_EffectStatUp. */

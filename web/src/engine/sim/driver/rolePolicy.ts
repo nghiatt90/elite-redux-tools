@@ -67,7 +67,7 @@ import {
   isBattlerTerrainAffected,
   isPowderImmune,
 } from '../statusEffects'
-import { buildTurnOrderContext } from '../turn'
+import { blocksStatusMove, buildTurnOrderContext, getStatusMoveAbsorbingAbility } from '../turn'
 import type { ChosenAction } from '../turnOrder'
 import { getWhoStrikesFirst } from '../turnOrder'
 import type { PlayerChoice } from './expectimax'
@@ -601,6 +601,12 @@ function targetBlocksStatusMove(
   checkSubstitute: boolean,
 ): boolean {
   if (checkSubstitute && doesSubstituteBlockMove(session.state, attackerId, targetId, moveId, deps)) {
+    return true
+  }
+  if (blocksStatusMove(session.state, attackerId, targetId, moveId, deps)) {
+    return true
+  }
+  if (checkSubstitute && getStatusMoveAbsorbingAbility(session.state, attackerId, targetId, moveId, deps)) {
     return true
   }
   if (!session.data.dataContext.move(moveId)?.flags.magicCoatAffected) return false
@@ -1259,7 +1265,11 @@ function chooseStaller(
     }
     const curse = findEffect('EFFECT_CURSE')
     if (curse && (target.mon.status2 & STATUS2_CURSED) === 0) {
-      if (isGhostCurseUser(session)) return { choice: curse.choice, tag: 'residual' }
+      if (isGhostCurseUser(session)) {
+        if (!blocksStatusMove(session.state, 0, 1, curse.moveId, deps)) {
+          return { choice: curse.choice, tag: 'residual' }
+        }
+      }
     }
   }
 
