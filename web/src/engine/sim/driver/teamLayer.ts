@@ -20,6 +20,7 @@
 import type { AiDamageRolls } from '../ai/aiCalcDamage'
 import { aiDamageRolls } from '../ai/aiCalcDamage'
 import { DEFAULT_STAT_STAGE, STAT_ATK, STATUS_FIELD_TERRAIN_ANY } from '../constants'
+import { canBattlerEscape, isAbilityPreventingEscape, type EscapeDeps } from '../escape'
 import type { BattleState } from '../state'
 import { battlerHasSimAbility } from '../statBuffs'
 import { applySwitchInAbilities, type BattleStartDeps } from '../switchInAbility'
@@ -274,22 +275,28 @@ function pickBestBench(pool: BenchScore[]): BenchScore | null {
 // The switch mechanism
 // ---------------------------------------------------------------------------
 
-/** A voluntary switch to `slot`, by the active mon's pivot move when it has a
- * usable one, else by a hard switch (decision 14: "A switch uses the active
- * mon's pivot move when it has one (Safe Passage passing a Wish), else a hard
- * switch").
+/**
+ * A voluntary switch to `slot`, by the active mon's pivot move when it has a
+ * usable one, else by a hard switch (decision 14).
  *
- * A pivot choice carries its target in `switchTo`: `playPolicyBattle` writes it
- * to `monToSwitchIntoId` before `stepTurn` (policyBattle.ts:89-91), which the
- * switch step reads (turn.ts:1864), and the pivot handlers move it into the
- * bench (moveEffects.ts:10357-10466 for Safe Passage / Baton Pass).
+ * A pivot is taken only when `!view.threatened || outspeeds(session, info.choice.action, view.predictedAction)`.
+ * When threatened, a slower pivot lets the predicted hit land on the mon being saved,
+ * while a hard switch resolves before moves.
  *
- * `pivotSwitchWorks` (rolePolicy.ts:1104-1112) is the can-switch gate: a
- * HIT_ESCAPE move only queues its switch after it dealt HP damage
- * (turn.ts:4798-4803), so an immune range must fall back to the hard switch.
- * A Baton Pass / Shed Tail pivot needs a live bench slot, which holds here
- * because `slot` is a living candidate. */
-function switchChoice(session: BattleSession, slot: number): PlayerChoice | null {
+ * `pivotSwitchWorks` (rolePolicy.ts) gates HIT_ESCAPE on non-immune range, Shed Tail
+ * on HP and substitute, and Parting Shot on target stat stages.
+ *
+ * When no pivot qualifies, a hard switch is refused if trapped (CanBattlerEscape
+ * false or IsAbilityPreventingEscape prevents, battle_main.c:3745-3755, escape.ts)
+ * so subsequent purposes or the role rule can act; move-switches ignore escape
+ * prevention (jumpifcantswitch SWITCH_IGNORE_ESCAPE_PREVENTION, battle_scripts_1.s:5271,
+ * :5358, :5379) and are returned even when trapped.
+ */
+function switchChoice(
+  session: BattleSession,
+  slot: number,
+  view: PredictionView,
+): PlayerChoice | null {
   const legal = legalChoices(session)
   const hard = legal.find((choice) => choice.action.action === 'SWITCH' && choice.switchTo === slot)
   if (!hard) return null
@@ -297,8 +304,16 @@ function switchChoice(session: BattleSession, slot: number): PlayerChoice | null
   for (const info of evaluateMoves(session, null)) {
     if (!info.moveId || !pivotIds.has(info.moveId)) continue
     const effect = session.data.dataContext.move(info.moveId)?.effect ?? null
-    if (!pivotSwitchWorks(info, effect)) continue
+    if (!pivotSwitchWorks(session, info, effect, null)) continue
+    if (view.threatened && !outspeeds(session, info.choice.action, view.predictedAction)) continue
     return { ...info.choice, switchTo: slot }
+  }
+  const deps: EscapeDeps = {
+    dataContext: session.data.dataContext,
+    grounding: session.turnDeps.grounding,
+  }
+  if (!canBattlerEscape(session.state, 0, deps) || isAbilityPreventingEscape(session.state, 0, deps).prevents) {
+    return null
   }
   return hard
 }
@@ -499,7 +514,7 @@ function rulePreserve(
   if (active.partyIndex !== genes.preserve || !view.threatened) return null
   const slot = pickBenchSlot(session, view.predictedMoveId)
   if (slot === null) return null
-  return switchChoice(session, slot)
+  return switchChoice(session, slot, view)
 }
 
 /** sacrifice: our active mon is doomed -- some predicted sample move can KO it
@@ -592,7 +607,7 @@ function ruleCounter(
     candidates.push(scored)
   }
   if (candidates.length === 0) return null
-  return switchChoice(session, pickBestBench(candidates)!.slot)
+  return switchChoice(session, pickBestBench(candidates)!.slot, view)
 }
 
 /** entryAbility: a bench mon's switch-in ability applies now and the mon
@@ -666,7 +681,7 @@ function ruleEntryAbility(
     if (scored) candidates.push(scored)
   }
   if (candidates.length === 0) return null
-  return switchChoice(session, pickBestBench(candidates)!.slot)
+  return switchChoice(session, pickBestBench(candidates)!.slot, view)
 }
 
 /** support: bring in a support teammate whose effect is not up yet. Does not
@@ -703,7 +718,7 @@ function ruleSupport(
     candidates.push(scored)
   }
   if (candidates.length === 0) return null
-  return switchChoice(session, pickBestBench(candidates)!.slot)
+  return switchChoice(session, pickBestBench(candidates)!.slot, view)
 }
 
 /** Their active mon's moves that still have PP and therefore can be forced. */
@@ -768,7 +783,11 @@ function takesLittleOrNothing(incoming: PpLoopIncoming | null): incoming is PpLo
  * whose worst-case fraction of HP is smallest (ties go to the lower slot). The
  * stall count (updated on every `policy` call) stops it once both sides have
  * switched for `PP_LOOP_STALL_LIMIT` turns with no HP or PP change. */
-function rulePpLoop(session: BattleSession, stallCount: number): PlayerChoice | null {
+function rulePpLoop(
+  session: BattleSession,
+  view: PredictionView,
+  stallCount: number,
+): PlayerChoice | null {
   if (stallCount >= PP_LOOP_STALL_LIMIT) return null
   const theirMoves = theirUsableMoves(session)
   if (theirMoves.length === 0) return null
@@ -789,7 +808,7 @@ function rulePpLoop(session: BattleSession, stallCount: number): PlayerChoice | 
     if (left < right || (left === right && slot < best.slot)) best = { slot, incoming }
   }
   if (best === null) return null
-  return switchChoice(session, best.slot)
+  return switchChoice(session, best.slot, view)
 }
 
 // ---------------------------------------------------------------------------
@@ -914,7 +933,7 @@ export function createTeamLayer(config: {
           choice = ruleSupport(session, view, genes, roles)
           break
         case 'ppLoop':
-          choice = rulePpLoop(session, ppLoopStallCount)
+          choice = rulePpLoop(session, view, ppLoopStallCount)
           break
       }
       if (choice) {

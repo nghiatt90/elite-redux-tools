@@ -930,16 +930,6 @@ export function pickBenchSlot(session: BattleSession, predictedMoveId: string | 
   return best
 }
 
-/** Shed Tail's own gates beyond the bench test: it fails under an existing
- * substitute (data/battle_scripts_1.s:5356) and when Cmd_setsubstitute's
- * `hp <= max(1, maxHP / 2)` check fails (battle_script_commands.c:10535-10555,
- * ported in moveEffects.ts's handleShedTail). */
-function shedTailWorks(session: BattleSession): boolean {
-  const mon = session.state.battlers[0]?.mon
-  if (!mon) return false
-  return mon.hp > Math.max(1, Math.floor(mon.maxHp / 2)) && (mon.status2 & STATUS2_SUBSTITUTE) === 0
-}
-
 /** pivot: on a bad matchup (threatened, or unable to damage the target) use the
  * first pivot move that can really switch -- a HIT_ESCAPE whose damage lands,
  * Shed Tail past its own gates, and any of them with a live bench slot -- into
@@ -970,8 +960,7 @@ function choosePivot(
         const pivot = moves.find((info) => info.moveId === id)
         if (!pivot) continue
         const effect = session.data.dataContext.move(id)?.effect ?? null
-        if (!pivotSwitchWorks(pivot, effect)) continue
-        if (effect === 'EFFECT_SHED_TAIL' && !shedTailWorks(session)) continue
+        if (!pivotSwitchWorks(session, pivot, effect, targetSlot)) continue
         // Baton Pass and the escape moves read monToSwitchIntoId (turn.ts:1864);
         // playPolicyBattle writes it from the choice's switchTo before stepTurn.
         return { choice: { ...pivot.choice, switchTo: bench }, tag: 'pivot' }
@@ -1288,12 +1277,37 @@ function chooseBatonPassSetup(
   return boost ? { choice: boost.choice, tag: 'setup' } : null
 }
 
-/** The can-switch gate for a pivot move used by support. A HIT_ESCAPE move
- * only queues its switch after it dealt HP damage (turn.ts:4798-4803,
- * `sumHpDealt > 0`), so an immune range wastes the turn; the other pivot
- * effects switch from their own script once a live bench slot exists. */
-export function pivotSwitchWorks(pivot: MoveChoiceInfo, effect: string | null): boolean {
+/** The can-switch gate for a pivot move across teamLayer, choosePivot and chooseSupport:
+ * - EFFECT_HIT_ESCAPE only queues its switch after dealing HP damage (turn.ts:4798-4803,
+ *   `sumHpDealt > 0`), so an immune range fails to switch.
+ * - EFFECT_SHED_TAIL fails when STATUS2_SUBSTITUTE is already set (battle_scripts_1.s:5356)
+ *   or hp <= max(1, floor(maxHp / 2)) (Cmd_setsubstitute, battle_script_commands.c:10535-10546).
+ * - EFFECT_PARTING_SHOT fails with no switch when the target's Attack and Sp. Atk stages
+ *   are both MIN_STAT_STAGE (battle_scripts_1.s:1091-1096, :6638-6643; handlePartingShot in
+ *   moveEffects.ts:10845-10849). Applied only when targetSlot is null (the active battler 1);
+ *   a predicted switch-in (non-null slot) enters with fresh stages.
+ * - Other pivot effects switch once a live bench slot exists. */
+export function pivotSwitchWorks(
+  session: BattleSession,
+  pivot: MoveChoiceInfo,
+  effect: string | null,
+  targetSlot: number | null,
+): boolean {
   if (effect === 'EFFECT_HIT_ESCAPE') return !!pivot.range && !pivot.range.isImmune
+  if (effect === 'EFFECT_SHED_TAIL') {
+    const mon = session.state.battlers[0]?.mon
+    if (!mon) return false
+    return mon.hp > Math.max(1, Math.floor(mon.maxHp / 2)) && (mon.status2 & STATUS2_SUBSTITUTE) === 0
+  }
+  if (effect === 'EFFECT_PARTING_SHOT') {
+    if (targetSlot !== null) return true
+    const target = session.state.battlers[1]?.mon
+    if (!target) return true
+    const atkStage = target.statStages[STAT_ATK] ?? DEFAULT_STAT_STAGE
+    const spAtkStage = target.statStages[STAT_SPATK] ?? DEFAULT_STAT_STAGE
+    if (atkStage === MIN_STAT_STAGE && spAtkStage === MIN_STAT_STAGE) return false
+    return true
+  }
   return true
 }
 
@@ -1325,7 +1339,7 @@ function chooseSupport(
     const pivot = moves.find((info) => info.moveId === pivotId)!
     const bench = pickBenchSlot(session, view.predictedMoveId)
     const effect = session.data.dataContext.move(pivotId)?.effect ?? null
-    if (bench !== null && pivotSwitchWorks(pivot, effect)) {
+    if (bench !== null && pivotSwitchWorks(session, pivot, effect, targetSlot)) {
       return { choice: { ...pivot.choice, switchTo: bench }, tag: 'pivot' }
     }
   }

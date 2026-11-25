@@ -14,7 +14,15 @@
 import { describe, expect, it } from 'vitest'
 
 import { aiDamageRolls } from './ai/aiCalcDamage'
-import { PARTY_SIZE } from './constants'
+import {
+  DEFAULT_STAT_STAGE,
+  MIN_STAT_STAGE,
+  PARTY_SIZE,
+  STAT_ATK,
+  STAT_SPATK,
+  STATUS2_ESCAPE_PREVENTION,
+  STATUS2_SUBSTITUTE,
+} from './constants'
 import { buildPlayerParty } from './driver/buildParty'
 import type { PlayerMonSpec } from './driver/buildParty'
 import type { PlayerChoice } from './driver/expectimax'
@@ -97,6 +105,12 @@ const OUR_SNORLAX: PlayerMonSpec = {
   moves: ['MOVE_BODY_SLAM', 'MOVE_CELEBRATE'],
 }
 const OUR_AGGRON: PlayerMonSpec = { species: 'SPECIES_AGGRON', level: 50, moves: ['MOVE_IRON_HEAD'] }
+const OUR_INTIMIDATE: PlayerMonSpec = {
+  species: 'SPECIES_AGGRON',
+  level: 50,
+  moves: ['MOVE_IRON_HEAD'],
+  ability: 'ABILITY_INTIMIDATE',
+}
 // The fast-heavy-hitter fixture: Jolteon (Speed 150) is far faster than their
 // Machamp (Speed 75), and its Thunderbolt onto their 165 HP Machamp rolls
 // 78..92 with mean 84.6875 -- 2 * 78 = 156 < 165 (no two-hit KO) but
@@ -506,21 +520,44 @@ describe('cycle 947 - team layer: sacrifice', () => {
 })
 
 describe('cycle 947 - team layer: the switch mechanism', () => {
-  it('a pivot holder switches by its pivot move', () => {
-    // Snorlax with U-turn (EFFECT_HIT_ESCAPE, data/v2.65beta/moves.json); Bug is
-    // 1x into Fighting, so pivotSwitchWorks' non-immune gate passes and the
-    // switch is the move action carrying switchTo.
+  it('a pivot holder switches by its pivot move when faster than the foe', () => {
+    // Jolteon with U-turn (EFFECT_HIT_ESCAPE, data/v2.65beta/moves.json); Bug is
+    // 1x into Fighting, so pivotSwitchWorks' non-immune gate passes. Jolteon (Spe 150)
+    // outspeeds Machamp (Spe 75), so the switch is the move action carrying switchTo.
     const s = session(
-      [{ species: 'SPECIES_SNORLAX', level: 50, moves: ['MOVE_U_TURN'] }, OUR_AGGRON],
+      [{ species: 'SPECIES_JOLTEON', level: 50, moves: ['MOVE_U_TURN'] }, OUR_AGGRON],
       [mon('SPECIES_MACHAMP', MACHAMP_BODY_SLAM)],
     )
-    patchMon(s.state, 0, 0, { hp: 80 })
+    expect(s.state.battlers[0]!.mon.rawStats.spe).toBe(150)
+    expect(s.state.battlers[1]!.mon.rawStats.spe).toBe(75)
+    expect(s.state.battlers[0]!.mon.rawStats.spe).toBeGreaterThan(s.state.battlers[1]!.mon.rawStats.spe)
+    patchMon(s.state, 0, 0, { hp: 40 })
     const layer = createTeamLayer({ roles: ['attacker', 'attacker'], genes: { preserve: 0 } })
     const trace: PolicyTraceEntry[] = []
     const choice = layer.policy(s, 1, trace)
     expect(trace[0]!.tags).toEqual(['team', 'preserve'])
     expect(choice!.action.action).toBe('USE_MOVE')
     expect(choiceMoveId(choice!)).toBe('MOVE_U_TURN')
+    expect(choice!.switchTo).toBe(1)
+  })
+
+  it('a threatened pivot holder slower than the foe hard-switches', () => {
+    // Snorlax (Spe 50) with U-turn is slower than Machamp (Spe 75); under threat,
+    // a slow pivot lets the predicted hit land on the mon being saved, so it
+    // falls back to the hard switch.
+    const s = session(
+      [{ species: 'SPECIES_SNORLAX', level: 50, moves: ['MOVE_U_TURN'] }, OUR_AGGRON],
+      [mon('SPECIES_MACHAMP', MACHAMP_BODY_SLAM)],
+    )
+    expect(s.state.battlers[0]!.mon.rawStats.spe).toBe(50)
+    expect(s.state.battlers[1]!.mon.rawStats.spe).toBe(75)
+    expect(s.state.battlers[0]!.mon.rawStats.spe).toBeLessThan(s.state.battlers[1]!.mon.rawStats.spe)
+    patchMon(s.state, 0, 0, { hp: 80 })
+    const layer = createTeamLayer({ roles: ['attacker', 'attacker'], genes: { preserve: 0 } })
+    const trace: PolicyTraceEntry[] = []
+    const choice = layer.policy(s, 1, trace)
+    expect(trace[0]!.tags).toEqual(['team', 'preserve'])
+    expect(choice!.action.action).toBe('SWITCH')
     expect(choice!.switchTo).toBe(1)
   })
 
@@ -535,21 +572,218 @@ describe('cycle 947 - team layer: the switch mechanism', () => {
   })
 
   it('a HIT_ESCAPE pivot into an immune target falls back to the hard switch', () => {
-    // Volt Switch is Electric and their Donphan is Ground: the range is immune,
-    // so the move would deal no HP and never queue its switch
-    // (turn.ts:4798-4803), and pivotSwitchWorks (rolePolicy.ts:1104-1108)
-    // refuses it.
+    // Jolteon (Spe 150 > Donphan Spe 70) with Volt Switch: Jolteon outspeeds, but Volt Switch
+    // is Electric and Donphan is Ground: the range is immune, so the move would deal no HP
+    // and never queue its switch (turn.ts:4798-4803), and pivotSwitchWorks refuses it.
     const s = session(
-      [{ species: 'SPECIES_SNORLAX', level: 50, moves: ['MOVE_VOLT_SWITCH'] }, OUR_AGGRON],
+      [{ species: 'SPECIES_JOLTEON', level: 50, moves: ['MOVE_VOLT_SWITCH'] }, OUR_AGGRON],
       [mon('SPECIES_DONPHAN', ['MOVE_EARTHQUAKE'])],
     )
-    patchMon(s.state, 0, 0, { hp: 80 })
+    expect(s.state.battlers[0]!.mon.rawStats.spe).toBe(150)
+    expect(s.state.battlers[1]!.mon.rawStats.spe).toBe(70)
+    expect(s.state.battlers[0]!.mon.rawStats.spe).toBeGreaterThan(s.state.battlers[1]!.mon.rawStats.spe)
+    patchMon(s.state, 0, 0, { hp: 40 })
     const layer = createTeamLayer({ roles: ['attacker', 'attacker'], genes: { preserve: 0 } })
     const trace: PolicyTraceEntry[] = []
     const choice = layer.policy(s, 1, trace)
     expect(trace[0]!.tags).toEqual(['team', 'preserve'])
     expect(choice!.action.action).toBe('SWITCH')
     expect(choice!.switchTo).toBe(1)
+  })
+
+  it('item 1: counterSession with STATUS2_ESCAPE_PREVENTION falls through to role rule', () => {
+    const s = counterSession()
+    patchMon(s.state, 0, 0, { status2: STATUS2_ESCAPE_PREVENTION })
+    const layer = createTeamLayer({ roles: ['attacker', 'setupSweeper'] })
+    const trace: PolicyTraceEntry[] = []
+    const choice = layer.policy(s, 1, trace)
+    expect(trace[0]!.tags).toEqual(['attacker', 'damage'])
+    expect(choiceMoveId(choice!)).toBe('MOVE_BODY_SLAM')
+  })
+
+  it('item 1: trapped by ABILITY_SHADOW_TAG falls through to role; ITEM_SHED_SHELL still hard-switches', () => {
+    const s1 = counterSession()
+    patchMon(s1.state, 1, 0, { abilities: { ability: 'ABILITY_SHADOW_TAG', innates: [] } })
+    const layer = createTeamLayer({ roles: ['attacker', 'setupSweeper'] })
+    const trace1: PolicyTraceEntry[] = []
+    const choice1 = layer.policy(s1, 1, trace1)
+    expect(trace1[0]!.tags).toEqual(['attacker', 'damage'])
+    expect(choiceMoveId(choice1!)).toBe('MOVE_BODY_SLAM')
+
+    const s2 = session(
+      [{ species: 'SPECIES_SNORLAX', level: 50, item: 'ITEM_SHED_SHELL', moves: ['MOVE_BODY_SLAM', 'MOVE_CELEBRATE'] }, OUR_AGGRON],
+      [mon('SPECIES_MACHAMP', MACHAMP_BODY_SLAM)],
+    )
+    patchMon(s2.state, 0, 0, { hp: 80, status2: STATUS2_ESCAPE_PREVENTION })
+    patchMon(s2.state, 1, 0, { hp: 150 })
+    const trace2: PolicyTraceEntry[] = []
+    const choice2 = layer.policy(s2, 1, trace2)
+    expect(trace2[0]!.tags).toEqual(['team', 'counter'])
+    expect(choice2!.action.action).toBe('SWITCH')
+    expect(choice2!.switchTo).toBe(1)
+  })
+
+  it('item 1: trapped U-turn holder faster than the foe still pivots and executes switch', () => {
+    const s = session(
+      [{ species: 'SPECIES_JOLTEON', level: 50, moves: ['MOVE_U_TURN'] }, OUR_AGGRON],
+      [mon('SPECIES_MACHAMP', MACHAMP_BODY_SLAM)],
+    )
+    expect(s.state.battlers[0]!.mon.rawStats.spe).toBe(150)
+    expect(s.state.battlers[1]!.mon.rawStats.spe).toBe(75)
+    expect(s.state.battlers[0]!.mon.rawStats.spe).toBeGreaterThan(s.state.battlers[1]!.mon.rawStats.spe)
+    patchMon(s.state, 0, 0, { hp: 40, status2: STATUS2_ESCAPE_PREVENTION })
+    const layer = createTeamLayer({ roles: ['attacker', 'attacker'], genes: { preserve: 0 } })
+    const trace: PolicyTraceEntry[] = []
+    beginTurn(s)
+    const choice = layer.policy(s, 1, trace)
+    expect(trace[0]!.tags).toEqual(['team', 'preserve'])
+    expect(choice!.action.action).toBe('USE_MOVE')
+    expect(choiceMoveId(choice!)).toBe('MOVE_U_TURN')
+    expect(choice!.switchTo).toBe(1)
+
+    s.state.battlers[0]!.monToSwitchIntoId = choice!.switchTo ?? PARTY_SIZE
+    stepTurn(s, choice!.action)
+    expect(s.state.battlers[0]!.partyIndex).toBe(1)
+  })
+
+  it('item 2: slower pivot under threat hard-switches; faster pivots; trapped slower falls through to role', () => {
+    // Slower pivot under threat hard-switches:
+    const sSlow = session(
+      [{ species: 'SPECIES_SNORLAX', level: 50, moves: ['MOVE_U_TURN', 'MOVE_BODY_SLAM'] }, OUR_AGGRON],
+      [mon('SPECIES_MACHAMP', MACHAMP_BODY_SLAM)],
+    )
+    expect(sSlow.state.battlers[0]!.mon.rawStats.spe).toBe(50)
+    expect(sSlow.state.battlers[1]!.mon.rawStats.spe).toBe(75)
+    expect(sSlow.state.battlers[0]!.mon.rawStats.spe).toBeLessThan(sSlow.state.battlers[1]!.mon.rawStats.spe)
+    patchMon(sSlow.state, 0, 0, { hp: 80 })
+    const layer = createTeamLayer({ roles: ['attacker', 'attacker'], genes: { preserve: 0 } })
+    const choiceSlow = layer.policy(sSlow, 1, [])
+    expect(choiceSlow!.action.action).toBe('SWITCH')
+    expect(choiceSlow!.switchTo).toBe(1)
+
+    // Faster pivot under threat pivots:
+    const sFast = session(
+      [{ species: 'SPECIES_JOLTEON', level: 50, moves: ['MOVE_U_TURN'] }, OUR_AGGRON],
+      [mon('SPECIES_MACHAMP', MACHAMP_BODY_SLAM)],
+    )
+    expect(sFast.state.battlers[0]!.mon.rawStats.spe).toBe(150)
+    expect(sFast.state.battlers[1]!.mon.rawStats.spe).toBe(75)
+    expect(sFast.state.battlers[0]!.mon.rawStats.spe).toBeGreaterThan(sFast.state.battlers[1]!.mon.rawStats.spe)
+    patchMon(sFast.state, 0, 0, { hp: 40 })
+    const choiceFast = layer.policy(sFast, 1, [])
+    expect(choiceFast!.action.action).toBe('USE_MOVE')
+    expect(choiceMoveId(choiceFast!)).toBe('MOVE_U_TURN')
+    expect(choiceFast!.switchTo).toBe(1)
+
+    // Trapped slower pivot under threat falls through to role:
+    const sTrapped = session(
+      [{ species: 'SPECIES_SNORLAX', level: 50, moves: ['MOVE_U_TURN', 'MOVE_BODY_SLAM'] }, OUR_AGGRON],
+      [mon('SPECIES_MACHAMP', MACHAMP_BODY_SLAM)],
+    )
+    patchMon(sTrapped.state, 0, 0, { hp: 80, status2: STATUS2_ESCAPE_PREVENTION })
+    const traceTrapped: PolicyTraceEntry[] = []
+    const choiceTrapped = layer.policy(sTrapped, 1, traceTrapped)
+    expect(traceTrapped[0]!.tags).toEqual(['attacker', 'damage'])
+    expect(choiceMoveId(choiceTrapped!)).toBe('MOVE_BODY_SLAM')
+  })
+
+  it('item 2: preserve with only Teleport hard-switches, but unthreatened view uses Teleport', () => {
+    // Jolteon with Teleport (priority -6): under threat from Machamp (priority 0), outspeeds returns false
+    const sThreatened = session(
+      [{ species: 'SPECIES_JOLTEON', level: 50, moves: ['MOVE_TELEPORT'] }, OUR_AGGRON],
+      [mon('SPECIES_MACHAMP', MACHAMP_BODY_SLAM)],
+    )
+    expect(sThreatened.state.battlers[0]!.mon.rawStats.spe).toBe(150)
+    expect(sThreatened.state.battlers[1]!.mon.rawStats.spe).toBe(75)
+    expect(sThreatened.state.battlers[0]!.mon.rawStats.spe).toBeGreaterThan(sThreatened.state.battlers[1]!.mon.rawStats.spe)
+    patchMon(sThreatened.state, 0, 0, { hp: 40 })
+    const layerPreserve = createTeamLayer({ roles: ['attacker', 'attacker'], genes: { preserve: 0 } })
+    const choiceThreatened = layerPreserve.policy(sThreatened, 1, [])
+    expect(choiceThreatened!.action.action).toBe('SWITCH')
+    expect(choiceThreatened!.switchTo).toBe(1)
+
+    // Control: unthreatened Snorlax (HP 220, Body Slam rolls 39..46, so 46*100/220 = 20.9% < 50%) uses Teleport under entryAbility
+    const sUnthreatened = session(
+      [{ species: 'SPECIES_SNORLAX', level: 50, moves: ['MOVE_TELEPORT'] }, OUR_INTIMIDATE],
+      [mon('SPECIES_MACHAMP', MACHAMP_BODY_SLAM)],
+    )
+    const layerEntry = createTeamLayer({
+      roles: ['attacker', 'attacker'],
+      genes: {
+        purposeFlags: {
+          preserve: false,
+          sacrifice: false,
+          counter: false,
+          entryAbility: true,
+          support: false,
+          ppLoop: false,
+        },
+      },
+    })
+    const traceEntry: PolicyTraceEntry[] = []
+    const choiceEntry = layerEntry.policy(sUnthreatened, 1, traceEntry)
+    expect(traceEntry[0]!.tags).toEqual(['team', 'entryAbility'])
+    expect(choiceEntry!.action.action).toBe('USE_MOVE')
+    expect(choiceMoveId(choiceEntry!)).toBe('MOVE_TELEPORT')
+    expect(choiceEntry!.switchTo).toBe(1)
+  })
+
+  it('item 3: Shed Tail at floor(maxHp/2) hard-switches; at floor(maxHp/2)+1 pivots; with substitute hard-switches', () => {
+    const s = session(
+      [{ species: 'SPECIES_JOLTEON', level: 50, moves: ['MOVE_SHED_TAIL'] }, OUR_AGGRON],
+      [mon('SPECIES_MACHAMP', MACHAMP_BODY_SLAM)],
+    )
+    expect(s.state.battlers[0]!.mon.rawStats.spe).toBe(150)
+    expect(s.state.battlers[1]!.mon.rawStats.spe).toBe(75)
+    expect(s.state.battlers[0]!.mon.rawStats.spe).toBeGreaterThan(s.state.battlers[1]!.mon.rawStats.spe)
+    const maxHp = s.state.battlers[0]!.mon.maxHp
+    const half = Math.floor(maxHp / 2)
+    const layer = createTeamLayer({ roles: ['attacker', 'attacker'], genes: { preserve: 0 } })
+
+    // 6a. hp = floor(maxHp / 2): fails Shed Tail HP check (hp <= floor(maxHp/2)), falls back to hard switch
+    patchMon(s.state, 0, 0, { hp: half })
+    const choiceAtHalf = layer.policy(s, 1, [])
+    expect(choiceAtHalf!.action.action).toBe('SWITCH')
+    expect(choiceAtHalf!.switchTo).toBe(1)
+
+    // 6b. hp = floor(maxHp / 2) + 1: passes Shed Tail HP check and uses Shed Tail
+    patchMon(s.state, 0, 0, { hp: half + 1 })
+    const choiceAboveHalf = layer.policy(s, 1, [])
+    expect(choiceAboveHalf!.action.action).toBe('USE_MOVE')
+    expect(choiceMoveId(choiceAboveHalf!)).toBe('MOVE_SHED_TAIL')
+    expect(choiceAboveHalf!.switchTo).toBe(1)
+
+    // 6c. hp = floor(maxHp / 2) + 1 with substitute already active: fails Shed Tail, hard-switches
+    patchMon(s.state, 0, 0, { hp: half + 1, status2: STATUS2_SUBSTITUTE })
+    const choiceSub = layer.policy(s, 1, [])
+    expect(choiceSub!.action.action).toBe('SWITCH')
+    expect(choiceSub!.switchTo).toBe(1)
+  })
+
+  it('item 3: Parting Shot with both target stages 0 hard-switches; only Attack at 0 still uses Parting Shot', () => {
+    const s = session(
+      [{ species: 'SPECIES_JOLTEON', level: 50, moves: ['MOVE_PARTING_SHOT'] }, OUR_AGGRON],
+      [mon('SPECIES_MACHAMP', MACHAMP_BODY_SLAM)],
+    )
+    expect(s.state.battlers[0]!.mon.rawStats.spe).toBe(150)
+    expect(s.state.battlers[1]!.mon.rawStats.spe).toBe(75)
+    expect(s.state.battlers[0]!.mon.rawStats.spe).toBeGreaterThan(s.state.battlers[1]!.mon.rawStats.spe)
+    const layer = createTeamLayer({ roles: ['attacker', 'attacker'], genes: { preserve: 0 } })
+
+    // 7a. Both target Attack and Sp. Atk at MIN_STAT_STAGE (0): Parting Shot cannot switch, hard-switches
+    patchMon(s.state, 0, 0, { hp: 15 })
+    s.state.battlers[1]!.mon.statStages[STAT_ATK] = MIN_STAT_STAGE
+    s.state.battlers[1]!.mon.statStages[STAT_SPATK] = MIN_STAT_STAGE
+    const choiceBothMin = layer.policy(s, 1, [])
+    expect(choiceBothMin!.action.action).toBe('SWITCH')
+    expect(choiceBothMin!.switchTo).toBe(1)
+
+    // 7b. Only Attack at MIN_STAT_STAGE (Sp. Atk neutral 6): Parting Shot works and is chosen
+    s.state.battlers[1]!.mon.statStages[STAT_SPATK] = DEFAULT_STAT_STAGE
+    const choiceAtkMinOnly = layer.policy(s, 1, [])
+    expect(choiceAtkMinOnly!.action.action).toBe('USE_MOVE')
+    expect(choiceMoveId(choiceAtkMinOnly!)).toBe('MOVE_PARTING_SHOT')
+    expect(choiceAtkMinOnly!.switchTo).toBe(1)
   })
 })
 
