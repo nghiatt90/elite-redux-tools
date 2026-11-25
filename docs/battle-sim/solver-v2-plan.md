@@ -656,6 +656,55 @@ Order (seventh revision, 2026-11-24): **2.0 (policy gate)** -> 1.3 (set pools) -
     Step 2 and the result goes to Yoshi: the screen and the pools (answers/walls rules, lead plans, Step 1.3's ranking) are revisited before any GA code is written. The graded-fitness weights (decision 6) are checked on the same games:
     a weight is changed only if a lost game outscores a won one.
 
+### Step 2.0b results (cycles20e)
+
+Run settings: 80 games per policy per fight, 200-turn cap, seed offset 0, measured at commit `ec651c9`, six processes in parallel on 8 cores (so ms/game is a contended figure; time is recorded, not gated).
+
+| Fight | Policy | Wins/games | Rate | Wilson | ms/game | Capped | Boost available/used | Boosted / attacked boosted |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| TRAINER_SIDNEY-attack | role | 1/80 | 1.3% | [0.002, 0.067] | 983.2 | 0 | 155/0 | 9 / 9 |
+| TRAINER_SIDNEY-attack | expectimax | 71/80 | 88.8% | [0.800, 0.940] | 2017.6 | 0 | 298/100 | 218 / 141 |
+| TRAINER_PHOEBE-attack | role | 60/80 | 75.0% | [0.645, 0.832] | 1086.1 | 0 | 40/0 | 0 / 0 |
+| TRAINER_PHOEBE-attack | expectimax | 15/80 | 18.8% | [0.117, 0.287] | 1575.5 | 0 | 276/4 | 10 / 10 |
+| TRAINER_GLACIA-attack | role | 0/80 | 0.0% | [-0.000, 0.046] | 1034.2 | 0 | 105/0 | 1 / 1 |
+| TRAINER_GLACIA-attack | expectimax | 0/80 | 0.0% | [-0.000, 0.046] | 1601.3 | 0 | 307/38 | 123 / 94 |
+| TRAINER_DRAKE-attack | role | 2/80 | 2.5% | [0.007, 0.087] | 863.2 | 0 | 100/0 | 0 / 0 |
+| TRAINER_DRAKE-attack | expectimax | 30/80 | 37.5% | [0.277, 0.485] | 2076.4 | 0 | 404/19 | 75 / 60 |
+| TRAINER_STEVEN-attack | role | 0/80 | 0.0% | [-0.000, 0.046] | 703.0 | 0 | 72/0 | 0 / 0 |
+| TRAINER_STEVEN-attack | expectimax | 0/80 | 0.0% | [-0.000, 0.046] | 1304.9 | 0 | 202/0 | 80 / 80 |
+| TRAINER_GLACIA-stall | role | 3/80 | 3.8% | [0.013, 0.105] | 2544.7 | 0 | 304/0 | 224 / 224 |
+| TRAINER_GLACIA-stall | expectimax | 5/80 | 6.3% | [0.027, 0.138] | 5742.4 | 0 | 452/0 | 185 / 92 |
+
+AI voluntary switches (turn counts; what our policy did on those turns):
+
+| Fight | Policy | AI switches | Our action on those turns |
+| --- | --- | --- | --- |
+| TRAINER_SIDNEY-attack | role | 0 | none |
+| TRAINER_SIDNEY-attack | expectimax | 0 | none |
+| TRAINER_PHOEBE-attack | role | 0 | none |
+| TRAINER_PHOEBE-attack | expectimax | 0 | none |
+| TRAINER_GLACIA-attack | role | 1 | MOVE_MOONBLAST=1 |
+| TRAINER_GLACIA-attack | expectimax | 3 | MOVE_MOONBLAST=2, MOVE_SNIPE_SHOT=1 |
+| TRAINER_DRAKE-attack | role | 2 | MOVE_SHOCKING_JAB=2 |
+| TRAINER_DRAKE-attack | expectimax | 75 | MOVE_MOONBLAST=57, SWITCH=18 |
+| TRAINER_STEVEN-attack | role | 0 | none |
+| TRAINER_STEVEN-attack | expectimax | 0 | none |
+| TRAINER_GLACIA-stall | role | 0 | none |
+| TRAINER_GLACIA-stall | expectimax | 5 | MOVE_ASTEROID_DOWNFALL=4, MOVE_FIRE_BLAST=1 |
+
+Per-fight verdict as the rule gives it (from `classifyWinRates`; `uninformative` is not a fail), with whether the two Wilson intervals overlap:
+
+- `TRAINER_SIDNEY-attack`: `role<expectimax`; intervals do not overlap.
+- `TRAINER_PHOEBE-attack`: `role>=expectimax`; intervals do not overlap.
+- `TRAINER_GLACIA-attack`: `uninformative`; intervals overlap ([-0.000, 0.046] both).
+- `TRAINER_DRAKE-attack`: `role<expectimax`; intervals do not overlap.
+- `TRAINER_STEVEN-attack`: `uninformative`; intervals overlap ([-0.000, 0.046] both).
+- `TRAINER_GLACIA-stall`: `uninformative`; intervals overlap ([0.013, 0.105] vs [0.027, 0.138]).
+
+Battle logs: `docs/battle-sim/role-policy-logs/role-TRAINER_SIDNEY-attack.log`, `role-TRAINER_PHOEBE-attack.log`, `role-TRAINER_GLACIA-attack.log`, `role-TRAINER_DRAKE-attack.log`, `role-TRAINER_STEVEN-attack.log`, `role-TRAINER_GLACIA-stall.log` (role games 1 and 2 of each fight).
+
+No overall pass or fail is declared here; Yoshi reads the logs and decides (a fail stops Steps 1.3 and 2.x). The measured policy does NOT include two known open fixes: 946f (staller and support status-move gates in `rolePolicy.ts` that let a failing move be chosen again every turn) and s20ccb (the counter purpose's bench-side speed check ignores move priority); both can affect these numbers.
+
 ### Step 2.1 results (cycle942)
 Landed: `web/src/engine/sim/driver/satisficingSearch.ts` (pure, headless, one unit per evaluator, evaluation and neighbour generation injected), covering decision 7 (a)-(d): the start build sampled on report seeds and returning immediately when `won`, screening by `fitnessValue`, at most `FINALISTS` (3) tuning samples per round in screen order, at most 3 report-seed confirmations, `UNIT_CAP` (6000, placeholder) with a per-run overshoot, `noNeighbours`, the highest-tuning-rate incumbent move, and the report-seed re-scoring of up to 3 candidates for units that end not reliably `won`. Candidate records carry `change` (`teamDiff`, decision 9a), `screenFitness`, `tuneVerdict/Wins/Games` and `reportVerdict/Wins/Games`; results carry `fragilityChecked: false` and `whatToChange: []` when `won`. `solver.ts` only exports `shuffled`. Tests: `cycle942SatisficingSearch.test.ts` (9 tests, fake evaluator, hand-derived game counts and seeds).
 Left: the Step 1.2 report writer (JSON + markdown), Step 2.2 (battle summary and loss anatomy), and wiring into `solverCli.ts`/`solverWorker.ts` with `improveTeam` removed. Fragility (2.3) is not modelled, so "reliably `won`" is verdict `won` only.

@@ -1,0 +1,46 @@
+{
+  "key": "TRAINER_DRAKE-attack",
+  "trainer": "TRAINER_DRAKE",
+  "kind": "attack",
+  "role": {
+    "policy": "role",
+    "wins": 2,
+    "games": 80,
+    "rate": 0.025,
+    "lower": 0.006882748898125228,
+    "upper": 0.08664600055322111,
+    "msPerGame": 863.2268125124996,
+    "capped": 0,
+    "available": 100,
+    "used": 0,
+    "boosted": 0,
+    "attackedWhileBoosted": 0,
+    "aiSwitches": 2,
+    "aiSwitchByThing": {
+      "MOVE_SHOCKING_JAB": 2
+    }
+  },
+  "expectimax": {
+    "policy": "expectimax",
+    "wins": 30,
+    "games": 80,
+    "rate": 0.375,
+    "lower": 0.2769401625800477,
+    "upper": 0.484514771486096,
+    "msPerGame": 2076.391512812501,
+    "capped": 0,
+    "available": 404,
+    "used": 19,
+    "boosted": 75,
+    "attackedWhileBoosted": 60,
+    "aiSwitches": 75,
+    "aiSwitchByThing": {
+      "MOVE_MOONBLAST": 57,
+      "SWITCH": 18
+    }
+  },
+  "classification": "role<expectimax",
+  "logFiles": [
+    "role-TRAINER_DRAKE-attack.log"
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "key": "TRAINER_STEVEN-attack",
+  "trainer": "TRAINER_STEVEN",
+  "kind": "attack",
+  "role": {
+    "policy": "role",
+    "wins": 0,
+    "games": 80,
+    "rate": 0,
+    "lower": -3.469446951953614e-18,
+    "upper": 0.0458197362645751,
+    "msPerGame": 703.0141086875003,
+    "capped": 0,
+    "available": 72,
+    "used": 0,
+    "boosted": 0,
+    "attackedWhileBoosted": 0,
+    "aiSwitches": 0,
+    "aiSwitchByThing": {}
+  },
+  "expectimax": {
+    "policy": "expectimax",
+    "wins": 0,
+    "games": 80,
+    "rate": 0,
+    "lower": -3.469446951953614e-18,
+    "upper": 0.0458197362645751,
+    "msPerGame": 1304.8613822375003,
+    "capped": 0,
+    "available": 202,
+    "used": 0,
+    "boosted": 80,
+    "attackedWhileBoosted": 80,
+    "aiSwitches": 0,
+    "aiSwitchByThing": {}
+  },
+  "classification": "uninformative",
+  "logFiles": [
+    "role-TRAINER_STEVEN-attack.log"
+  ]
+}

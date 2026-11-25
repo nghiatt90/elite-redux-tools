@@ -1,0 +1,41 @@
+{
+  "key": "TRAINER_PHOEBE-attack",
+  "trainer": "TRAINER_PHOEBE",
+  "kind": "attack",
+  "role": {
+    "policy": "role",
+    "wins": 60,
+    "games": 80,
+    "rate": 0.75,
+    "lower": 0.6451511899886556,
+    "upper": 0.8319389418790569,
+    "msPerGame": 1086.1362530000004,
+    "capped": 0,
+    "available": 40,
+    "used": 0,
+    "boosted": 0,
+    "attackedWhileBoosted": 0,
+    "aiSwitches": 0,
+    "aiSwitchByThing": {}
+  },
+  "expectimax": {
+    "policy": "expectimax",
+    "wins": 15,
+    "games": 80,
+    "rate": 0.1875,
+    "lower": 0.11705207812728378,
+    "upper": 0.2865852570380757,
+    "msPerGame": 1575.5205602,
+    "capped": 0,
+    "available": 276,
+    "used": 4,
+    "boosted": 10,
+    "attackedWhileBoosted": 10,
+    "aiSwitches": 0,
+    "aiSwitchByThing": {}
+  },
+  "classification": "role>=expectimax",
+  "logFiles": [
+    "role-TRAINER_PHOEBE-attack.log"
+  ]
+}

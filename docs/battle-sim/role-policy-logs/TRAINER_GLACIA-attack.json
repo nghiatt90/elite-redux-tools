@@ -1,0 +1,46 @@
+{
+  "key": "TRAINER_GLACIA-attack",
+  "trainer": "TRAINER_GLACIA",
+  "kind": "attack",
+  "role": {
+    "policy": "role",
+    "wins": 0,
+    "games": 80,
+    "rate": 0,
+    "lower": -3.469446951953614e-18,
+    "upper": 0.0458197362645751,
+    "msPerGame": 1034.1938774499995,
+    "capped": 0,
+    "available": 105,
+    "used": 0,
+    "boosted": 1,
+    "attackedWhileBoosted": 1,
+    "aiSwitches": 1,
+    "aiSwitchByThing": {
+      "MOVE_MOONBLAST": 1
+    }
+  },
+  "expectimax": {
+    "policy": "expectimax",
+    "wins": 0,
+    "games": 80,
+    "rate": 0,
+    "lower": -3.469446951953614e-18,
+    "upper": 0.0458197362645751,
+    "msPerGame": 1601.2829581999983,
+    "capped": 0,
+    "available": 307,
+    "used": 38,
+    "boosted": 123,
+    "attackedWhileBoosted": 94,
+    "aiSwitches": 3,
+    "aiSwitchByThing": {
+      "MOVE_MOONBLAST": 2,
+      "MOVE_SNIPE_SHOT": 1
+    }
+  },
+  "classification": "uninformative",
+  "logFiles": [
+    "role-TRAINER_GLACIA-attack.log"
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "key": "TRAINER_SIDNEY-attack",
+  "trainer": "TRAINER_SIDNEY",
+  "kind": "attack",
+  "role": {
+    "policy": "role",
+    "wins": 1,
+    "games": 80,
+    "rate": 0.0125,
+    "lower": 0.002209918618306224,
+    "upper": 0.06746432423965451,
+    "msPerGame": 983.2084881875004,
+    "capped": 0,
+    "available": 155,
+    "used": 0,
+    "boosted": 9,
+    "attackedWhileBoosted": 9,
+    "aiSwitches": 0,
+    "aiSwitchByThing": {}
+  },
+  "expectimax": {
+    "policy": "expectimax",
+    "wins": 71,
+    "games": 80,
+    "rate": 0.8875,
+    "lower": 0.7998158913432244,
+    "upper": 0.9396738130517298,
+    "msPerGame": 2017.595346075001,
+    "capped": 0,
+    "available": 298,
+    "used": 100,
+    "boosted": 218,
+    "attackedWhileBoosted": 141,
+    "aiSwitches": 0,
+    "aiSwitchByThing": {}
+  },
+  "classification": "role<expectimax",
+  "logFiles": [
+    "role-TRAINER_SIDNEY-attack.log"
+  ]
+}

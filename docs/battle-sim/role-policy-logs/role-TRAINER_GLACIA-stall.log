@@ -1,0 +1,941 @@
+== TRAINER_GLACIA-stall role game 1 seed 1000 ==
+Turn 1
+  player: SPECIES_LICKILICKY HP 405/405 status none
+  opponent: SPECIES_LAPRAS HP 373/373 status none
+  our choice: MOVE_WRING_OUT
+  trace: staller:damage MOVE_WRING_OUT
+  AI action: USE_MOVE MOVE_SPARKLING_ARIA
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=210 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=57 attackerDamage=- fainted=[] statusApplied=GASTRO_ACID->1
+Turn 2
+  player: SPECIES_LICKILICKY HP 220/405 status none
+  opponent: SPECIES_LAPRAS_MEGA HP 316/373 status none
+  our choice: MOVE_WRING_OUT
+  trace: team:sacrifice MOVE_WRING_OUT
+  AI action: USE_MOVE MOVE_SPARKLING_ARIA
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=206 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=62 attackerDamage=- fainted=[] statusApplied=none
+Turn 3
+  player: SPECIES_LICKILICKY HP 39/405 status none
+  opponent: SPECIES_LAPRAS_MEGA HP 254/373 status none
+  our choice: MOVE_WRING_OUT
+  trace: team:sacrifice MOVE_WRING_OUT
+  AI action: USE_MOVE MOVE_SPARKLING_ARIA
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=221 attackerDamage=- fainted=[0] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 4
+  player: SPECIES_KANGASKHAN_MEGA HP 283/283 status none
+  opponent: SPECIES_LAPRAS_MEGA HP 254/373 status none
+  our choice: MOVE_FAKE_OUT
+  trace: attacker:fakeout MOVE_FAKE_OUT
+  AI action: USE_MOVE MOVE_SPARKLING_ARIA
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=67 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=170 attackerDamage=- fainted=[] statusApplied=none
+Turn 5
+  player: SPECIES_KANGASKHAN_MEGA HP 113/283 status none
+  opponent: SPECIES_LAPRAS_MEGA HP 187/373 status none
+  our choice: MOVE_DOUBLE_EDGE
+  trace: attacker:ko MOVE_DOUBLE_EDGE
+  AI action: USE_MOVE MOVE_FREEZE_DRY
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=212 attackerDamage=62 fainted=[1] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 6
+  player: SPECIES_KANGASKHAN_MEGA HP 97/283 status none
+  opponent: SPECIES_CHIEN_PAO HP 243/243 status none
+  our choice: MOVE_DOUBLE_EDGE
+  trace: team:sacrifice MOVE_DOUBLE_EDGE
+  AI action: USE_MOVE MOVE_CRUNCH
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=218 attackerDamage=- fainted=[0] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 7
+  player: SPECIES_RHYPERIOR HP 299/299 status none
+  opponent: SPECIES_CHIEN_PAO HP 243/243 status none
+  our choice: MOVE_ASTEROID_DOWNFALL
+  trace: setupSweeper:ko MOVE_ASTEROID_DOWNFALL
+  AI action: USE_MOVE MOVE_ICE_FANG
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=249 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=242 attackerDamage=- fainted=[] statusApplied=none
+Turn 8
+  player: SPECIES_RHYPERIOR HP 68/299 status none stages spe+4
+  opponent: SPECIES_CHIEN_PAO HP 1/243 status none
+  our choice: MOVE_ASTEROID_DOWNFALL
+  trace: setupSweeper:ko MOVE_ASTEROID_DOWNFALL
+  AI action: USE_MOVE MOVE_BLEAKWIND_STORM
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=287 attackerDamage=- fainted=[1] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 9
+  player: SPECIES_RHYPERIOR HP 86/299 status none stages spe+4
+  opponent: SPECIES_KYUREM_WHITE HP 314/314 status none
+  our choice: MOVE_ASTEROID_DOWNFALL
+  trace: setupSweeper:ko MOVE_ASTEROID_DOWNFALL
+  AI action: USE_MOVE MOVE_BLUE_FLARE
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=405 attackerDamage=- fainted=[1] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 10
+  player: SPECIES_RHYPERIOR HP 86/299 status none stages spe+4
+  opponent: SPECIES_ARTICUNO_EX HP 297/297 status none
+  our choice: MOVE_ASTEROID_DOWNFALL
+  trace: setupSweeper:damage MOVE_ASTEROID_DOWNFALL
+  AI action: USE_MOVE MOVE_GUST
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=91 attackerDamage=- fainted=[0] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 11
+  player: SPECIES_BLISSEY HP 573/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_SEISMIC_TOSS
+  trace: staller:damage MOVE_SEISMIC_TOSS
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=165 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 12
+  player: SPECIES_BLISSEY HP 407/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_SEISMIC_TOSS
+  trace: staller:damage MOVE_SEISMIC_TOSS
+  AI action: USE_MOVE MOVE_GUST
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=80 attackerDamage=- fainted=[] statusApplied=none
+Turn 13
+  player: SPECIES_BLISSEY HP 406/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 254/297 status none
+  our choice: MOVE_SEISMIC_TOSS
+  trace: staller:damage MOVE_SEISMIC_TOSS
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=147 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 14
+  player: SPECIES_BLISSEY HP 258/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 291/297 status none
+  our choice: MOVE_WISH
+  trace: staller:wish MOVE_WISH
+  AI action: USE_MOVE MOVE_GUST
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 15
+  player: SPECIES_BLISSEY HP 257/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_WISH
+  trace: staller:wish MOVE_WISH
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 16
+  player: SPECIES_BLISSEY HP 256/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_PROTECT
+  trace: staller:protect MOVE_PROTECT
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 17
+  player: SPECIES_BLISSEY HP 541/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_SEISMIC_TOSS
+  trace: staller:damage MOVE_SEISMIC_TOSS
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 18
+  player: SPECIES_BLISSEY HP 540/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_SEISMIC_TOSS
+  trace: staller:damage MOVE_SEISMIC_TOSS
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 19
+  player: SPECIES_BLISSEY HP 539/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_SEISMIC_TOSS
+  trace: staller:damage MOVE_SEISMIC_TOSS
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 20
+  player: SPECIES_BLISSEY HP 538/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_SEISMIC_TOSS
+  trace: staller:damage MOVE_SEISMIC_TOSS
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 21
+  player: SPECIES_BLISSEY HP 537/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_SEISMIC_TOSS
+  trace: staller:damage MOVE_SEISMIC_TOSS
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 22
+  player: SPECIES_BLISSEY HP 536/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_SEISMIC_TOSS
+  trace: staller:damage MOVE_SEISMIC_TOSS
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 23
+  player: SPECIES_BLISSEY HP 535/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_SEISMIC_TOSS
+  trace: staller:damage MOVE_SEISMIC_TOSS
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 24
+  player: SPECIES_BLISSEY HP 534/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_SEISMIC_TOSS
+  trace: staller:damage MOVE_SEISMIC_TOSS
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 25
+  player: SPECIES_BLISSEY HP 533/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_WISH
+  trace: staller:first MOVE_WISH
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 26
+  player: SPECIES_BLISSEY HP 532/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_WISH
+  trace: staller:first MOVE_WISH
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 27
+  player: SPECIES_BLISSEY HP 572/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_WISH
+  trace: staller:first MOVE_WISH
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 28
+  player: SPECIES_BLISSEY HP 571/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_WISH
+  trace: staller:first MOVE_WISH
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 29
+  player: SPECIES_BLISSEY HP 572/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_WISH
+  trace: staller:first MOVE_WISH
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 30
+  player: SPECIES_BLISSEY HP 571/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_WISH
+  trace: staller:first MOVE_WISH
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 31
+  player: SPECIES_BLISSEY HP 572/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_WISH
+  trace: staller:first MOVE_WISH
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 32
+  player: SPECIES_BLISSEY HP 571/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_WISH
+  trace: staller:first MOVE_WISH
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 33
+  player: SPECIES_BLISSEY HP 572/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_WISH
+  trace: staller:first MOVE_WISH
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 34
+  player: SPECIES_BLISSEY HP 571/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_SAFE_PASSAGE
+  trace: staller:first MOVE_SAFE_PASSAGE
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 35
+  player: SPECIES_WEEZING HP 264/301 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_FIRE_BLAST
+  trace: leadHazard:staller:damage MOVE_FIRE_BLAST
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 36
+  player: SPECIES_WEEZING HP 227/301 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_FIRE_BLAST
+  trace: leadHazard:staller:damage MOVE_FIRE_BLAST
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 37
+  player: SPECIES_WEEZING HP 190/301 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_FIRE_BLAST
+  trace: leadHazard:staller:damage MOVE_FIRE_BLAST
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 38
+  player: SPECIES_WEEZING HP 153/301 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_FIRE_BLAST
+  trace: leadHazard:staller:damage MOVE_FIRE_BLAST
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 39
+  player: SPECIES_WEEZING HP 116/301 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_FIRE_BLAST
+  trace: leadHazard:staller:damage MOVE_FIRE_BLAST
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 40
+  player: SPECIES_WEEZING HP 79/301 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_TOXIC
+  trace: leadHazard:staller:first MOVE_TOXIC
+  AI action: USE_MOVE MOVE_FREEZE_DRY
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=TOXIC->1
+Turn 41
+  player: SPECIES_WEEZING HP 42/301 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 279/297 status TOX
+  our choice: MOVE_PROTECT
+  trace: leadHazard:staller:protect MOVE_PROTECT
+  AI action: USE_MOVE MOVE_FREEZE_DRY
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 42
+  player: SPECIES_WEEZING HP 5/301 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 261/297 status TOX
+  our choice: MOVE_TOXIC
+  trace: leadHazard:staller:first MOVE_TOXIC
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 43
+  player: SPECIES_BLISSEY HP 571/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 243/297 status TOX
+  our choice: MOVE_PROTECT
+  trace: staller:protect MOVE_PROTECT
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 44
+  player: SPECIES_BLISSEY HP 570/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 208/297 status TOX
+  our choice: MOVE_SAFE_PASSAGE
+  trace: staller:first MOVE_SAFE_PASSAGE
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 45
+  player: SPECIES_TANGROWTH HP 305/325 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 155/297 status TOX
+  our choice: MOVE_PROTECT
+  trace: staller:protect MOVE_PROTECT
+  AI action: USE_MOVE MOVE_GUST
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 46
+  player: SPECIES_TANGROWTH HP 305/325 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 84/297 status TOX
+  our choice: MOVE_LEECH_SEED
+  trace: staller:residual MOVE_LEECH_SEED
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 47
+  player: SPECIES_TANGROWTH HP 305/325 status none
+  opponent: SPECIES_BEEDRILL_REDUX HP 219/219 status none
+  our choice: MOVE_LEECH_SEED
+  trace: staller:residual MOVE_LEECH_SEED
+  AI action: USE_MOVE MOVE_ICICLE_SPEAR
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=175 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 48
+  player: SPECIES_TANGROWTH HP 197/325 status none
+  opponent: SPECIES_BEEDRILL_REDUX HP 192/219 status none
+  our choice: MOVE_PROTECT
+  trace: staller:protect MOVE_PROTECT
+  AI action: USE_MOVE MOVE_PIN_MISSILE
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 49
+  player: SPECIES_TANGROWTH HP 264/325 status none
+  opponent: SPECIES_BEEDRILL_REDUX HP 165/219 status none
+  our choice: MOVE_LEECH_SEED
+  trace: staller:first MOVE_LEECH_SEED
+  AI action: USE_MOVE MOVE_ICICLE_SPEAR
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=173 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 50
+  player: SPECIES_TANGROWTH HP 158/325 status none
+  opponent: SPECIES_BEEDRILL_REDUX HP 138/219 status none
+  our choice: MOVE_PROTECT
+  trace: staller:protect MOVE_PROTECT
+  AI action: USE_MOVE MOVE_TOXIC_NEEDLES
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 51
+  player: SPECIES_TANGROWTH HP 225/325 status none
+  opponent: SPECIES_BEEDRILL_REDUX HP 111/219 status none
+  our choice: MOVE_LEECH_SEED
+  trace: staller:first MOVE_LEECH_SEED
+  AI action: USE_MOVE MOVE_ICICLE_SPEAR
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=171 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 52
+  player: SPECIES_TANGROWTH HP 121/325 status none
+  opponent: SPECIES_BEEDRILL_REDUX HP 84/219 status none
+  our choice: MOVE_PROTECT
+  trace: staller:protect MOVE_PROTECT
+  AI action: USE_MOVE MOVE_TOXIC_NEEDLES
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 53
+  player: SPECIES_TANGROWTH HP 188/325 status none
+  opponent: SPECIES_BEEDRILL_REDUX HP 57/219 status none
+  our choice: MOVE_LEECH_SEED
+  trace: staller:first MOVE_LEECH_SEED
+  AI action: USE_MOVE MOVE_TOXIC_NEEDLES
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=178 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 54
+  player: SPECIES_TANGROWTH HP 77/325 status none
+  opponent: SPECIES_BEEDRILL_REDUX HP 30/219 status none
+  our choice: MOVE_PROTECT
+  trace: staller:protect MOVE_PROTECT
+  AI action: USE_MOVE MOVE_PIN_MISSILE
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 55
+  player: SPECIES_TANGROWTH HP 144/325 status none
+  opponent: SPECIES_BEEDRILL_REDUX HP 3/219 status none
+  our choice: MOVE_LEECH_SEED
+  trace: staller:first MOVE_LEECH_SEED
+  AI action: USE_MOVE MOVE_ICICLE_SPEAR
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=170 attackerDamage=- fainted=[0] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 56
+  player: SPECIES_BLISSEY HP 570/573 status none
+  opponent: SPECIES_BEEDRILL_REDUX HP 3/219 status none
+  our choice: MOVE_PROTECT
+  trace: staller:protect MOVE_PROTECT
+  AI action: USE_MOVE MOVE_ICICLE_SPEAR
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 57
+  player: SPECIES_BLISSEY HP 573/573 status none
+  opponent: SPECIES_DEWGONG HP 309/309 status none
+  our choice: MOVE_SAFE_PASSAGE
+  trace: staller:first MOVE_SAFE_PASSAGE
+  AI action: USE_MOVE MOVE_DRILL_RUN
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=366 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 58
+  player: SPECIES_BLISSEY HP 277/573 status none
+  opponent: SPECIES_DEWGONG_MEGA HP 309/309 status none
+  our choice: MOVE_SAFE_PASSAGE
+  trace: staller:first MOVE_SAFE_PASSAGE
+  AI action: USE_MOVE MOVE_AQUA_BASH
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=332 attackerDamage=- fainted=[0] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Outcome: LOST in 58 turns
+
+== TRAINER_GLACIA-stall role game 2 seed 2000 ==
+Turn 1
+  player: SPECIES_LICKILICKY HP 405/405 status none
+  opponent: SPECIES_LAPRAS HP 373/373 status none
+  our choice: MOVE_WRING_OUT
+  trace: staller:damage MOVE_WRING_OUT
+  AI action: USE_MOVE MOVE_SPARKLING_ARIA
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=210 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=57 attackerDamage=- fainted=[] statusApplied=GASTRO_ACID->1
+Turn 2
+  player: SPECIES_LICKILICKY HP 220/405 status none
+  opponent: SPECIES_LAPRAS_MEGA HP 316/373 status none
+  our choice: MOVE_WRING_OUT
+  trace: team:sacrifice MOVE_WRING_OUT
+  AI action: USE_MOVE MOVE_SPARKLING_ARIA
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=212 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=65 attackerDamage=- fainted=[] statusApplied=none
+Turn 3
+  player: SPECIES_LICKILICKY HP 33/405 status none
+  opponent: SPECIES_LAPRAS_MEGA HP 251/373 status none
+  our choice: MOVE_WRING_OUT
+  trace: team:sacrifice MOVE_WRING_OUT
+  AI action: USE_MOVE MOVE_SPARKLING_ARIA
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=190 attackerDamage=- fainted=[0] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 4
+  player: SPECIES_KANGASKHAN_MEGA HP 283/283 status none
+  opponent: SPECIES_LAPRAS_MEGA HP 251/373 status none
+  our choice: MOVE_FAKE_OUT
+  trace: attacker:fakeout MOVE_FAKE_OUT
+  AI action: USE_MOVE MOVE_SPARKLING_ARIA
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=68 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=194 attackerDamage=- fainted=[] statusApplied=none
+Turn 5
+  player: SPECIES_KANGASKHAN_MEGA HP 89/283 status none
+  opponent: SPECIES_LAPRAS_MEGA HP 183/373 status none
+  our choice: MOVE_DOUBLE_EDGE
+  trace: attacker:ko MOVE_DOUBLE_EDGE
+  AI action: USE_MOVE MOVE_SPARKLING_ARIA
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=206 attackerDamage=61 fainted=[1] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 6
+  player: SPECIES_KANGASKHAN_MEGA HP 73/283 status none
+  opponent: SPECIES_CHIEN_PAO HP 243/243 status none
+  our choice: MOVE_DOUBLE_EDGE
+  trace: team:sacrifice MOVE_DOUBLE_EDGE
+  AI action: USE_MOVE MOVE_ICE_FANG
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=191 attackerDamage=- fainted=[0] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 7
+  player: SPECIES_RHYPERIOR HP 299/299 status none
+  opponent: SPECIES_CHIEN_PAO HP 243/243 status none
+  our choice: MOVE_ASTEROID_DOWNFALL
+  trace: setupSweeper:ko MOVE_ASTEROID_DOWNFALL
+  AI action: USE_MOVE MOVE_ICE_FANG
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=283 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=242 attackerDamage=- fainted=[] statusApplied=none
+Turn 8
+  player: SPECIES_RHYPERIOR HP 34/299 status none stages spe+4
+  opponent: SPECIES_CHIEN_PAO HP 1/243 status none
+  our choice: MOVE_ASTEROID_DOWNFALL
+  trace: setupSweeper:ko MOVE_ASTEROID_DOWNFALL
+  AI action: USE_MOVE MOVE_ICE_FANG
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=430 attackerDamage=- fainted=[1] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 9
+  player: SPECIES_RHYPERIOR HP 52/299 status none stages spe+4
+  opponent: SPECIES_KYUREM_WHITE HP 314/314 status none
+  our choice: MOVE_ASTEROID_DOWNFALL
+  trace: setupSweeper:ko MOVE_ASTEROID_DOWNFALL
+  AI action: USE_MOVE MOVE_BLUE_FLARE
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=348 attackerDamage=- fainted=[1] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 10
+  player: SPECIES_RHYPERIOR HP 52/299 status none stages spe+4
+  opponent: SPECIES_ARTICUNO_EX HP 297/297 status none
+  our choice: MOVE_ASTEROID_DOWNFALL
+  trace: setupSweeper:damage MOVE_ASTEROID_DOWNFALL
+  AI action: USE_MOVE MOVE_GUST
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=94 attackerDamage=- fainted=[0] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 11
+  player: SPECIES_BLISSEY HP 573/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_SEISMIC_TOSS
+  trace: staller:damage MOVE_SEISMIC_TOSS
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=152 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 12
+  player: SPECIES_BLISSEY HP 420/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_SEISMIC_TOSS
+  trace: staller:damage MOVE_SEISMIC_TOSS
+  AI action: USE_MOVE MOVE_GUST
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=80 attackerDamage=- fainted=[] statusApplied=none
+Turn 13
+  player: SPECIES_BLISSEY HP 419/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 254/297 status none
+  our choice: MOVE_SEISMIC_TOSS
+  trace: staller:damage MOVE_SEISMIC_TOSS
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=147 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 14
+  player: SPECIES_BLISSEY HP 271/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 291/297 status none
+  our choice: MOVE_WISH
+  trace: staller:wish MOVE_WISH
+  AI action: USE_MOVE MOVE_GUST
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 15
+  player: SPECIES_BLISSEY HP 270/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_WISH
+  trace: staller:wish MOVE_WISH
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 16
+  player: SPECIES_BLISSEY HP 269/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_PROTECT
+  trace: staller:protect MOVE_PROTECT
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 17
+  player: SPECIES_BLISSEY HP 554/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_SEISMIC_TOSS
+  trace: staller:damage MOVE_SEISMIC_TOSS
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 18
+  player: SPECIES_BLISSEY HP 553/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_SEISMIC_TOSS
+  trace: staller:damage MOVE_SEISMIC_TOSS
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 19
+  player: SPECIES_BLISSEY HP 552/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_SEISMIC_TOSS
+  trace: staller:damage MOVE_SEISMIC_TOSS
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 20
+  player: SPECIES_BLISSEY HP 551/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_SEISMIC_TOSS
+  trace: staller:damage MOVE_SEISMIC_TOSS
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 21
+  player: SPECIES_BLISSEY HP 550/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_SEISMIC_TOSS
+  trace: staller:damage MOVE_SEISMIC_TOSS
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 22
+  player: SPECIES_BLISSEY HP 549/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_SEISMIC_TOSS
+  trace: staller:damage MOVE_SEISMIC_TOSS
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 23
+  player: SPECIES_BLISSEY HP 548/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_SEISMIC_TOSS
+  trace: staller:damage MOVE_SEISMIC_TOSS
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 24
+  player: SPECIES_BLISSEY HP 547/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_SEISMIC_TOSS
+  trace: staller:damage MOVE_SEISMIC_TOSS
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 25
+  player: SPECIES_BLISSEY HP 546/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_WISH
+  trace: staller:first MOVE_WISH
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 26
+  player: SPECIES_BLISSEY HP 545/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_WISH
+  trace: staller:first MOVE_WISH
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 27
+  player: SPECIES_BLISSEY HP 572/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_WISH
+  trace: staller:first MOVE_WISH
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 28
+  player: SPECIES_BLISSEY HP 571/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_WISH
+  trace: staller:first MOVE_WISH
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 29
+  player: SPECIES_BLISSEY HP 572/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_WISH
+  trace: staller:first MOVE_WISH
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 30
+  player: SPECIES_BLISSEY HP 571/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_WISH
+  trace: staller:first MOVE_WISH
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 31
+  player: SPECIES_BLISSEY HP 572/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_WISH
+  trace: staller:first MOVE_WISH
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 32
+  player: SPECIES_BLISSEY HP 571/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_WISH
+  trace: staller:first MOVE_WISH
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 33
+  player: SPECIES_BLISSEY HP 572/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_WISH
+  trace: staller:first MOVE_WISH
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 34
+  player: SPECIES_BLISSEY HP 571/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_SAFE_PASSAGE
+  trace: staller:first MOVE_SAFE_PASSAGE
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 35
+  player: SPECIES_WEEZING HP 264/301 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_FIRE_BLAST
+  trace: leadHazard:staller:damage MOVE_FIRE_BLAST
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 36
+  player: SPECIES_WEEZING HP 227/301 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_FIRE_BLAST
+  trace: leadHazard:staller:damage MOVE_FIRE_BLAST
+  AI action: USE_MOVE MOVE_FREEZE_DRY
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 37
+  player: SPECIES_WEEZING HP 190/301 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_FIRE_BLAST
+  trace: leadHazard:staller:damage MOVE_FIRE_BLAST
+  AI action: USE_MOVE MOVE_FREEZE_DRY
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 38
+  player: SPECIES_WEEZING HP 153/301 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_FIRE_BLAST
+  trace: leadHazard:staller:damage MOVE_FIRE_BLAST
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 39
+  player: SPECIES_WEEZING HP 116/301 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_FIRE_BLAST
+  trace: leadHazard:staller:damage MOVE_FIRE_BLAST
+  AI action: USE_MOVE MOVE_FREEZE_DRY
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 40
+  player: SPECIES_WEEZING HP 79/301 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 297/297 status none
+  our choice: MOVE_TOXIC
+  trace: leadHazard:staller:first MOVE_TOXIC
+  AI action: USE_MOVE MOVE_FREEZE_DRY
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=TOXIC->1
+Turn 41
+  player: SPECIES_WEEZING HP 42/301 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 279/297 status TOX
+  our choice: MOVE_PROTECT
+  trace: leadHazard:staller:protect MOVE_PROTECT
+  AI action: USE_MOVE MOVE_FREEZE_DRY
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 42
+  player: SPECIES_WEEZING HP 5/301 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 261/297 status TOX
+  our choice: MOVE_TOXIC
+  trace: leadHazard:staller:first MOVE_TOXIC
+  AI action: USE_MOVE MOVE_FREEZE_DRY
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 43
+  player: SPECIES_BLISSEY HP 571/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 243/297 status TOX
+  our choice: MOVE_PROTECT
+  trace: staller:protect MOVE_PROTECT
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 44
+  player: SPECIES_BLISSEY HP 570/573 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 208/297 status TOX
+  our choice: MOVE_SAFE_PASSAGE
+  trace: staller:first MOVE_SAFE_PASSAGE
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 45
+  player: SPECIES_TANGROWTH HP 305/325 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 155/297 status TOX
+  our choice: MOVE_PROTECT
+  trace: staller:protect MOVE_PROTECT
+  AI action: USE_MOVE MOVE_BLIZZARD
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 46
+  player: SPECIES_TANGROWTH HP 305/325 status none
+  opponent: SPECIES_ARTICUNO_EX_MEGA HP 84/297 status TOX
+  our choice: MOVE_LEECH_SEED
+  trace: staller:residual MOVE_LEECH_SEED
+  AI action: USE_MOVE MOVE_FREEZE_DRY
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=SKY_DROP targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 47
+  player: SPECIES_TANGROWTH HP 305/325 status none
+  opponent: SPECIES_BEEDRILL_REDUX HP 219/219 status none
+  our choice: MOVE_LEECH_SEED
+  trace: staller:residual MOVE_LEECH_SEED
+  AI action: USE_MOVE MOVE_TOXIC_NEEDLES
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=173 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 48
+  player: SPECIES_TANGROWTH HP 199/325 status none
+  opponent: SPECIES_BEEDRILL_REDUX HP 192/219 status none
+  our choice: MOVE_PROTECT
+  trace: staller:protect MOVE_PROTECT
+  AI action: USE_MOVE MOVE_TOXIC_NEEDLES
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 49
+  player: SPECIES_TANGROWTH HP 266/325 status none
+  opponent: SPECIES_BEEDRILL_REDUX HP 165/219 status none
+  our choice: MOVE_LEECH_SEED
+  trace: staller:first MOVE_LEECH_SEED
+  AI action: USE_MOVE MOVE_ICICLE_SPEAR
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=170 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 50
+  player: SPECIES_TANGROWTH HP 163/325 status none
+  opponent: SPECIES_BEEDRILL_REDUX HP 138/219 status none
+  our choice: MOVE_PROTECT
+  trace: staller:protect MOVE_PROTECT
+  AI action: USE_MOVE MOVE_ICICLE_SPEAR
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 51
+  player: SPECIES_TANGROWTH HP 230/325 status none
+  opponent: SPECIES_BEEDRILL_REDUX HP 111/219 status none
+  our choice: MOVE_LEECH_SEED
+  trace: staller:first MOVE_LEECH_SEED
+  AI action: USE_MOVE MOVE_ICICLE_SPEAR
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=167 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 52
+  player: SPECIES_TANGROWTH HP 130/325 status none
+  opponent: SPECIES_BEEDRILL_REDUX HP 84/219 status none
+  our choice: MOVE_PROTECT
+  trace: staller:protect MOVE_PROTECT
+  AI action: USE_MOVE MOVE_ICICLE_SPEAR
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 53
+  player: SPECIES_TANGROWTH HP 197/325 status none
+  opponent: SPECIES_BEEDRILL_REDUX HP 57/219 status none
+  our choice: MOVE_LEECH_SEED
+  trace: staller:first MOVE_LEECH_SEED
+  AI action: USE_MOVE MOVE_TOXIC_NEEDLES
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=176 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 54
+  player: SPECIES_TANGROWTH HP 88/325 status none
+  opponent: SPECIES_BEEDRILL_REDUX HP 30/219 status none
+  our choice: MOVE_PROTECT
+  trace: staller:protect MOVE_PROTECT
+  AI action: USE_MOVE MOVE_ICICLE_SPEAR
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 55
+  player: SPECIES_TANGROWTH HP 155/325 status none
+  opponent: SPECIES_BEEDRILL_REDUX HP 3/219 status none
+  our choice: MOVE_LEECH_SEED
+  trace: staller:first MOVE_LEECH_SEED
+  AI action: USE_MOVE MOVE_ICICLE_SPEAR
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=176 attackerDamage=- fainted=[0] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 56
+  player: SPECIES_BLISSEY HP 570/573 status none
+  opponent: SPECIES_BEEDRILL_REDUX HP 3/219 status none
+  our choice: MOVE_PROTECT
+  trace: staller:protect MOVE_PROTECT
+  AI action: USE_MOVE MOVE_TOXIC_NEEDLES
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 57
+  player: SPECIES_BLISSEY HP 573/573 status none
+  opponent: SPECIES_DEWGONG HP 309/309 status none
+  our choice: MOVE_SAFE_PASSAGE
+  trace: staller:first MOVE_SAFE_PASSAGE
+  AI action: USE_MOVE MOVE_DRILL_RUN
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=241 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 58
+  player: SPECIES_BLISSEY HP 402/573 status none
+  opponent: SPECIES_DEWGONG_MEGA HP 309/309 status none
+  our choice: MOVE_SAFE_PASSAGE
+  trace: staller:first MOVE_SAFE_PASSAGE
+  AI action: USE_MOVE MOVE_DRILL_RUN
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=252 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 59
+  player: SPECIES_BLISSEY HP 220/573 status none
+  opponent: SPECIES_DEWGONG_MEGA HP 309/309 status none
+  our choice: MOVE_SAFE_PASSAGE
+  trace: staller:first MOVE_SAFE_PASSAGE
+  AI action: USE_MOVE MOVE_AQUA_BASH
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=349 attackerDamage=- fainted=[0] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Outcome: LOST in 59 turns

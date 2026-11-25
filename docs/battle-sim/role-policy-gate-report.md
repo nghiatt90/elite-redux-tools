@@ -1,10 +1,8 @@
-SMOKE RUN: 4 games per policy; this is not the gate measurement.
-
 # Role policy gate report
 
 Written by `web/src/engine/sim/driver/policyComparison.test.ts` from the measured results. Nothing here is typed by hand.
 
-- Games per policy: 4
+- Games per policy: 80
 - Turn cap: 200
 - Seeds: `seedOffset + g * 1000` for game g, seedOffset 0 (game 1 = 1000); both policies use the same seed per game.
 - Wilson z: 1.96
@@ -25,18 +23,18 @@ Written by `web/src/engine/sim/driver/policyComparison.test.ts` from the measure
 
 | Fight | Policy | Wins | Games | Rate | Wilson low | Wilson high | ms/game | Capped | Available | Used | Boosted | Attacked boosted |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| TRAINER_SIDNEY-attack | role | 0 | 4 | 0.0% | 0.000 | 0.490 | 924.2 | 0 | 7 | 0 | 2 | 2 |
-| TRAINER_SIDNEY-attack | expectimax | 4 | 4 | 100.0% | 0.510 | 1.000 | 1843.2 | 0 | 18 | 8 | 10 | 4 |
-| TRAINER_PHOEBE-attack | role | 3 | 4 | 75.0% | 0.301 | 0.954 | 986.3 | 0 | 2 | 0 | 0 | 0 |
-| TRAINER_PHOEBE-attack | expectimax | 1 | 4 | 25.0% | 0.046 | 0.699 | 1405.9 | 0 | 16 | 1 | 3 | 3 |
-| TRAINER_GLACIA-attack | role | 0 | 4 | 0.0% | 0.000 | 0.490 | 901.0 | 0 | 4 | 0 | 1 | 1 |
-| TRAINER_GLACIA-attack | expectimax | 0 | 4 | 0.0% | 0.000 | 0.490 | 1301.5 | 0 | 13 | 3 | 8 | 6 |
-| TRAINER_DRAKE-attack | role | 0 | 4 | 0.0% | 0.000 | 0.490 | 809.8 | 0 | 5 | 0 | 0 | 0 |
-| TRAINER_DRAKE-attack | expectimax | 3 | 4 | 75.0% | 0.301 | 0.954 | 1773.2 | 0 | 20 | 1 | 1 | 1 |
-| TRAINER_STEVEN-attack | role | 0 | 4 | 0.0% | 0.000 | 0.490 | 687.8 | 0 | 4 | 0 | 0 | 0 |
-| TRAINER_STEVEN-attack | expectimax | 0 | 4 | 0.0% | 0.000 | 0.490 | 1021.0 | 0 | 6 | 0 | 4 | 4 |
-| TRAINER_GLACIA-stall | role | 0 | 4 | 0.0% | 0.000 | 0.490 | 3244.1 | 0 | 16 | 0 | 12 | 12 |
-| TRAINER_GLACIA-stall | expectimax | 1 | 4 | 25.0% | 0.046 | 0.699 | 6430.6 | 0 | 31 | 0 | 11 | 7 |
+| TRAINER_SIDNEY-attack | role | 1 | 80 | 1.3% | 0.002 | 0.067 | 983.2 | 0 | 155 | 0 | 9 | 9 |
+| TRAINER_SIDNEY-attack | expectimax | 71 | 80 | 88.8% | 0.800 | 0.940 | 2017.6 | 0 | 298 | 100 | 218 | 141 |
+| TRAINER_PHOEBE-attack | role | 60 | 80 | 75.0% | 0.645 | 0.832 | 1086.1 | 0 | 40 | 0 | 0 | 0 |
+| TRAINER_PHOEBE-attack | expectimax | 15 | 80 | 18.8% | 0.117 | 0.287 | 1575.5 | 0 | 276 | 4 | 10 | 10 |
+| TRAINER_GLACIA-attack | role | 0 | 80 | 0.0% | -0.000 | 0.046 | 1034.2 | 0 | 105 | 0 | 1 | 1 |
+| TRAINER_GLACIA-attack | expectimax | 0 | 80 | 0.0% | -0.000 | 0.046 | 1601.3 | 0 | 307 | 38 | 123 | 94 |
+| TRAINER_DRAKE-attack | role | 2 | 80 | 2.5% | 0.007 | 0.087 | 863.2 | 0 | 100 | 0 | 0 | 0 |
+| TRAINER_DRAKE-attack | expectimax | 30 | 80 | 37.5% | 0.277 | 0.485 | 2076.4 | 0 | 404 | 19 | 75 | 60 |
+| TRAINER_STEVEN-attack | role | 0 | 80 | 0.0% | -0.000 | 0.046 | 703.0 | 0 | 72 | 0 | 0 | 0 |
+| TRAINER_STEVEN-attack | expectimax | 0 | 80 | 0.0% | -0.000 | 0.046 | 1304.9 | 0 | 202 | 0 | 80 | 80 |
+| TRAINER_GLACIA-stall | role | 3 | 80 | 3.8% | 0.013 | 0.105 | 2544.7 | 0 | 304 | 0 | 224 | 224 |
+| TRAINER_GLACIA-stall | expectimax | 5 | 80 | 6.3% | 0.027 | 0.138 | 5742.4 | 0 | 452 | 0 | 185 | 92 |
 
 ## AI voluntary switches
 
@@ -46,31 +44,31 @@ Written by `web/src/engine/sim/driver/policyComparison.test.ts` from the measure
 | TRAINER_SIDNEY-attack | expectimax | 0 | none |
 | TRAINER_PHOEBE-attack | role | 0 | none |
 | TRAINER_PHOEBE-attack | expectimax | 0 | none |
-| TRAINER_GLACIA-attack | role | 0 | none |
-| TRAINER_GLACIA-attack | expectimax | 0 | none |
-| TRAINER_DRAKE-attack | role | 0 | none |
-| TRAINER_DRAKE-attack | expectimax | 3 | MOVE_MOONBLAST=3 |
+| TRAINER_GLACIA-attack | role | 1 | MOVE_MOONBLAST=1 |
+| TRAINER_GLACIA-attack | expectimax | 3 | MOVE_MOONBLAST=2, MOVE_SNIPE_SHOT=1 |
+| TRAINER_DRAKE-attack | role | 2 | MOVE_SHOCKING_JAB=2 |
+| TRAINER_DRAKE-attack | expectimax | 75 | MOVE_MOONBLAST=57, SWITCH=18 |
 | TRAINER_STEVEN-attack | role | 0 | none |
 | TRAINER_STEVEN-attack | expectimax | 0 | none |
 | TRAINER_GLACIA-stall | role | 0 | none |
-| TRAINER_GLACIA-stall | expectimax | 4 | MOVE_ASTEROID_DOWNFALL=4 |
+| TRAINER_GLACIA-stall | expectimax | 5 | MOVE_ASTEROID_DOWNFALL=4, MOVE_FIRE_BLAST=1 |
 
 ## Classification
 
 | Fight | Role rate | Expectimax rate | Classification |
 | --- | --- | --- | --- |
-| TRAINER_SIDNEY-attack | 0.0% | 100.0% | role<expectimax |
-| TRAINER_PHOEBE-attack | 75.0% | 25.0% | role>=expectimax |
+| TRAINER_SIDNEY-attack | 1.3% | 88.8% | role<expectimax |
+| TRAINER_PHOEBE-attack | 75.0% | 18.8% | role>=expectimax |
 | TRAINER_GLACIA-attack | 0.0% | 0.0% | uninformative |
-| TRAINER_DRAKE-attack | 0.0% | 75.0% | role<expectimax |
+| TRAINER_DRAKE-attack | 2.5% | 37.5% | role<expectimax |
 | TRAINER_STEVEN-attack | 0.0% | 0.0% | uninformative |
-| TRAINER_GLACIA-stall | 0.0% | 25.0% | role<expectimax |
+| TRAINER_GLACIA-stall | 3.8% | 6.3% | uninformative |
 
 ## Battle logs
 
-- TRAINER_SIDNEY-attack: `web/test-results/role-policy/role-TRAINER_SIDNEY-attack.log`
-- TRAINER_PHOEBE-attack: `web/test-results/role-policy/role-TRAINER_PHOEBE-attack.log`
-- TRAINER_GLACIA-attack: `web/test-results/role-policy/role-TRAINER_GLACIA-attack.log`
-- TRAINER_DRAKE-attack: `web/test-results/role-policy/role-TRAINER_DRAKE-attack.log`
-- TRAINER_STEVEN-attack: `web/test-results/role-policy/role-TRAINER_STEVEN-attack.log`
-- TRAINER_GLACIA-stall: `web/test-results/role-policy/role-TRAINER_GLACIA-stall.log`
+- TRAINER_SIDNEY-attack: `docs/battle-sim/role-policy-logs/role-TRAINER_SIDNEY-attack.log`
+- TRAINER_PHOEBE-attack: `docs/battle-sim/role-policy-logs/role-TRAINER_PHOEBE-attack.log`
+- TRAINER_GLACIA-attack: `docs/battle-sim/role-policy-logs/role-TRAINER_GLACIA-attack.log`
+- TRAINER_DRAKE-attack: `docs/battle-sim/role-policy-logs/role-TRAINER_DRAKE-attack.log`
+- TRAINER_STEVEN-attack: `docs/battle-sim/role-policy-logs/role-TRAINER_STEVEN-attack.log`
+- TRAINER_GLACIA-stall: `docs/battle-sim/role-policy-logs/role-TRAINER_GLACIA-stall.log`

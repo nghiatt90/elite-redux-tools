@@ -1,0 +1,177 @@
+== TRAINER_SIDNEY-attack role game 1 seed 1000 ==
+Turn 1
+  player: SPECIES_SCYTHER_MEGA HP 192/227 status none
+  opponent: SPECIES_ALAKAZAM_REDUX HP 203/203 status none
+  our choice: SWITCH -> SPECIES_KINGDRA_MEGA
+  trace: team:support -> 0
+  AI action: USE_MOVE MOVE_DARK_PULSE
+  action: battler=0 action=SWITCH missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=194 attackerDamage=- fainted=[] statusApplied=none
+Turn 2
+  player: SPECIES_KINGDRA_MEGA HP 41/235 status none
+  opponent: SPECIES_ALAKAZAM_MEGA_REDUX HP 203/203 status none
+  our choice: MOVE_RAIN_DANCE
+  trace: support:weather MOVE_RAIN_DANCE
+  AI action: USE_MOVE MOVE_DARK_PULSE
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=203 attackerDamage=- fainted=[0] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 3
+  player: SPECIES_SCYTHER_MEGA HP 192/227 status none
+  opponent: SPECIES_ALAKAZAM_MEGA_REDUX HP 203/203 status none
+  our choice: MOVE_FURY_CUTTER
+  trace: attacker:ko MOVE_FURY_CUTTER
+  AI action: USE_MOVE MOVE_DARK_PULSE
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=213 attackerDamage=- fainted=[0] statusApplied=none
+Turn 4
+  player: SPECIES_SOPRANICE HP 235/235 status none
+  opponent: SPECIES_ALAKAZAM_MEGA_REDUX HP 203/203 status none
+  our choice: MOVE_BOOMBURST
+  trace: attacker:ko MOVE_BOOMBURST
+  AI action: USE_MOVE MOVE_DARK_PULSE
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=313 attackerDamage=- fainted=[0] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 5
+  player: SPECIES_KAIOSEA HP 259/259 status none
+  opponent: SPECIES_ALAKAZAM_MEGA_REDUX HP 203/203 status none
+  our choice: MOVE_DRILL_PECK
+  trace: attacker:damage MOVE_DRILL_PECK
+  AI action: USE_MOVE MOVE_DARK_PULSE
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=170 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=204 attackerDamage=- fainted=[1] statusApplied=none
+Turn 6
+  player: SPECIES_KAIOSEA HP 155/259 status none
+  opponent: SPECIES_URSHIFU HP 275/275 status none
+  our choice: MOVE_DRILL_PECK
+  trace: attacker:ko MOVE_DRILL_PECK
+  AI action: USE_MOVE MOVE_POISON_JAB
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=176 attackerDamage=- fainted=[0] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 7
+  player: SPECIES_MR_MIME HP 229/229 status none
+  opponent: SPECIES_URSHIFU_MEGA HP 275/275 status none
+  our choice: MOVE_BATON_PASS (switchTo 2: SPECIES_STARMIE_MEGA)
+  trace: support:pivot MOVE_BATON_PASS
+  AI action: USE_MOVE MOVE_WICKED_BLOW
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=294 attackerDamage=- fainted=[0] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 8
+  player: SPECIES_STARMIE_MEGA HP 211/211 status none
+  opponent: SPECIES_URSHIFU_MEGA HP 275/275 status none
+  our choice: MOVE_WAVE_CRASH
+  trace: attacker:damage MOVE_WAVE_CRASH
+  AI action: USE_MOVE MOVE_WICKED_BLOW
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=258 attackerDamage=86 fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=45 attackerDamage=- fainted=[1] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 9
+  player: SPECIES_STARMIE_MEGA HP 193/211 status none
+  opponent: SPECIES_KINGAMBIT HP 325/325 status none
+  our choice: MOVE_WAVE_CRASH
+  trace: attacker:damage MOVE_WAVE_CRASH
+  AI action: USE_MOVE MOVE_SUCKER_PUNCH
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=253 attackerDamage=- fainted=[0] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Outcome: LOST in 9 turns
+
+== TRAINER_SIDNEY-attack role game 2 seed 2000 ==
+Turn 1
+  player: SPECIES_SCYTHER_MEGA HP 194/227 status none
+  opponent: SPECIES_ALAKAZAM_REDUX HP 203/203 status none
+  our choice: SWITCH -> SPECIES_KINGDRA_MEGA
+  trace: team:support -> 0
+  AI action: USE_MOVE MOVE_DARK_PULSE
+  action: battler=0 action=SWITCH missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=197 attackerDamage=- fainted=[] statusApplied=none
+Turn 2
+  player: SPECIES_KINGDRA_MEGA HP 38/235 status none
+  opponent: SPECIES_ALAKAZAM_MEGA_REDUX HP 203/203 status none
+  our choice: MOVE_RAIN_DANCE
+  trace: support:weather MOVE_RAIN_DANCE
+  AI action: USE_MOVE MOVE_DARK_PULSE
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=195 attackerDamage=- fainted=[0] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 3
+  player: SPECIES_SCYTHER_MEGA HP 194/227 status none
+  opponent: SPECIES_ALAKAZAM_MEGA_REDUX HP 203/203 status none
+  our choice: MOVE_FURY_CUTTER
+  trace: attacker:ko MOVE_FURY_CUTTER
+  AI action: USE_MOVE MOVE_DARK_PULSE
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=285 attackerDamage=- fainted=[1] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 4
+  player: SPECIES_SCYTHER_MEGA HP 194/227 status none stages atk-1,spa-1
+  opponent: SPECIES_YVELTAL HP 352/352 status none
+  our choice: MOVE_FURY_CUTTER
+  trace: attacker:damage MOVE_FURY_CUTTER
+  AI action: USE_MOVE MOVE_HEAT_WAVE
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=200 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=318 attackerDamage=- fainted=[0] statusApplied=none
+Turn 5
+  player: SPECIES_SOPRANICE HP 235/235 status none
+  opponent: SPECIES_YVELTAL HP 152/352 status none
+  our choice: MOVE_BOOMBURST
+  trace: attacker:ko MOVE_BOOMBURST
+  AI action: USE_MOVE MOVE_BADDY_BAD
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=307 attackerDamage=- fainted=[0] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 6
+  player: SPECIES_MR_MIME HP 229/229 status none
+  opponent: SPECIES_YVELTAL HP 152/352 status none
+  our choice: MOVE_BATON_PASS (switchTo 1: SPECIES_KAIOSEA)
+  trace: support:pivot MOVE_BATON_PASS
+  AI action: USE_MOVE MOVE_OBLIVION_WING
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=137 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 7
+  player: SPECIES_KAIOSEA HP 259/259 status none
+  opponent: SPECIES_YVELTAL HP 254/352 status none
+  our choice: MOVE_SHOCKING_JAB
+  trace: attacker:damage MOVE_SHOCKING_JAB
+  AI action: USE_MOVE MOVE_OBLIVION_WING
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=88 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=84 attackerDamage=- fainted=[] statusApplied=none
+Turn 8
+  player: SPECIES_KAIOSEA HP 191/259 status none
+  opponent: SPECIES_YVELTAL HP 229/352 status none
+  our choice: MOVE_SHOCKING_JAB
+  trace: attacker:damage MOVE_SHOCKING_JAB
+  AI action: USE_MOVE MOVE_OBLIVION_WING
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=82 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=157 attackerDamage=- fainted=[] statusApplied=none
+Turn 9
+  player: SPECIES_KAIOSEA HP 70/259 status none
+  opponent: SPECIES_YVELTAL HP 264/352 status none
+  our choice: MOVE_SHOCKING_JAB
+  trace: attacker:damage MOVE_SHOCKING_JAB
+  AI action: USE_MOVE MOVE_OBLIVION_WING
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=92 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=147 attackerDamage=- fainted=[0] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 10
+  player: SPECIES_MR_MIME HP 92/229 status none
+  opponent: SPECIES_YVELTAL HP 241/352 status none
+  our choice: MOVE_BATON_PASS (switchTo 2: SPECIES_STARMIE_MEGA)
+  trace: support:pivot MOVE_BATON_PASS
+  AI action: USE_MOVE MOVE_HEAT_WAVE
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=183 attackerDamage=- fainted=[0] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 11
+  player: SPECIES_STARMIE_MEGA HP 211/211 status none
+  opponent: SPECIES_YVELTAL HP 241/352 status none
+  our choice: MOVE_ICE_SPINNER
+  trace: attacker:ko MOVE_ICE_SPINNER
+  AI action: USE_MOVE MOVE_BADDY_BAD
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=261 attackerDamage=- fainted=[1] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 12
+  player: SPECIES_STARMIE_MEGA HP 211/211 status none
+  opponent: SPECIES_URSHIFU HP 275/275 status none
+  our choice: MOVE_WAVE_CRASH
+  trace: attacker:ko MOVE_WAVE_CRASH
+  AI action: USE_MOVE MOVE_WICKED_BLOW
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=632 attackerDamage=- fainted=[0] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Outcome: LOST in 12 turns

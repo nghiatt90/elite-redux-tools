@@ -1,0 +1,268 @@
+{
+  "source": "Yoshi, 2026-11-24: teams that won these fights in play (Elite tier, Permanent Mega Mode). Not planned lines: each was won at least once, possibly with a lot of RNG and luck, so a team's true win probability is unknown and may be low; use these for relative comparisons (policy A vs B on the same seeds), never as proof a policy should win. Mega Starmie EVs corrected to 252 Atk (confirmed). 'Kingdra Mega X' is SPECIES_KINGDRA_MEGA (the only Kingdra Mega in the data). 'lead' is the team index sent out first. Roles per docs/battle-sim/solver-v2-plan.md decision 14; used by Step 2.0.",
+  "games": 80,
+  "maxTurns": 200,
+  "seedOffset": 0,
+  "z": 1.96,
+  "fights": [
+    {
+      "key": "TRAINER_SIDNEY-attack",
+      "trainer": "TRAINER_SIDNEY",
+      "kind": "attack",
+      "role": {
+        "policy": "role",
+        "wins": 1,
+        "games": 80,
+        "rate": 0.0125,
+        "lower": 0.002209918618306224,
+        "upper": 0.06746432423965451,
+        "msPerGame": 983.2084881875004,
+        "capped": 0,
+        "available": 155,
+        "used": 0,
+        "boosted": 9,
+        "attackedWhileBoosted": 9,
+        "aiSwitches": 0,
+        "aiSwitchByThing": {}
+      },
+      "expectimax": {
+        "policy": "expectimax",
+        "wins": 71,
+        "games": 80,
+        "rate": 0.8875,
+        "lower": 0.7998158913432244,
+        "upper": 0.9396738130517298,
+        "msPerGame": 2017.595346075001,
+        "capped": 0,
+        "available": 298,
+        "used": 100,
+        "boosted": 218,
+        "attackedWhileBoosted": 141,
+        "aiSwitches": 0,
+        "aiSwitchByThing": {}
+      },
+      "classification": "role<expectimax",
+      "logFiles": [
+        "role-TRAINER_SIDNEY-attack.log"
+      ]
+    },
+    {
+      "key": "TRAINER_PHOEBE-attack",
+      "trainer": "TRAINER_PHOEBE",
+      "kind": "attack",
+      "role": {
+        "policy": "role",
+        "wins": 60,
+        "games": 80,
+        "rate": 0.75,
+        "lower": 0.6451511899886556,
+        "upper": 0.8319389418790569,
+        "msPerGame": 1086.1362530000004,
+        "capped": 0,
+        "available": 40,
+        "used": 0,
+        "boosted": 0,
+        "attackedWhileBoosted": 0,
+        "aiSwitches": 0,
+        "aiSwitchByThing": {}
+      },
+      "expectimax": {
+        "policy": "expectimax",
+        "wins": 15,
+        "games": 80,
+        "rate": 0.1875,
+        "lower": 0.11705207812728378,
+        "upper": 0.2865852570380757,
+        "msPerGame": 1575.5205602,
+        "capped": 0,
+        "available": 276,
+        "used": 4,
+        "boosted": 10,
+        "attackedWhileBoosted": 10,
+        "aiSwitches": 0,
+        "aiSwitchByThing": {}
+      },
+      "classification": "role>=expectimax",
+      "logFiles": [
+        "role-TRAINER_PHOEBE-attack.log"
+      ]
+    },
+    {
+      "key": "TRAINER_GLACIA-attack",
+      "trainer": "TRAINER_GLACIA",
+      "kind": "attack",
+      "role": {
+        "policy": "role",
+        "wins": 0,
+        "games": 80,
+        "rate": 0,
+        "lower": -3.469446951953614e-18,
+        "upper": 0.0458197362645751,
+        "msPerGame": 1034.1938774499995,
+        "capped": 0,
+        "available": 105,
+        "used": 0,
+        "boosted": 1,
+        "attackedWhileBoosted": 1,
+        "aiSwitches": 1,
+        "aiSwitchByThing": {
+          "MOVE_MOONBLAST": 1
+        }
+      },
+      "expectimax": {
+        "policy": "expectimax",
+        "wins": 0,
+        "games": 80,
+        "rate": 0,
+        "lower": -3.469446951953614e-18,
+        "upper": 0.0458197362645751,
+        "msPerGame": 1601.2829581999983,
+        "capped": 0,
+        "available": 307,
+        "used": 38,
+        "boosted": 123,
+        "attackedWhileBoosted": 94,
+        "aiSwitches": 3,
+        "aiSwitchByThing": {
+          "MOVE_MOONBLAST": 2,
+          "MOVE_SNIPE_SHOT": 1
+        }
+      },
+      "classification": "uninformative",
+      "logFiles": [
+        "role-TRAINER_GLACIA-attack.log"
+      ]
+    },
+    {
+      "key": "TRAINER_DRAKE-attack",
+      "trainer": "TRAINER_DRAKE",
+      "kind": "attack",
+      "role": {
+        "policy": "role",
+        "wins": 2,
+        "games": 80,
+        "rate": 0.025,
+        "lower": 0.006882748898125228,
+        "upper": 0.08664600055322111,
+        "msPerGame": 863.2268125124996,
+        "capped": 0,
+        "available": 100,
+        "used": 0,
+        "boosted": 0,
+        "attackedWhileBoosted": 0,
+        "aiSwitches": 2,
+        "aiSwitchByThing": {
+          "MOVE_SHOCKING_JAB": 2
+        }
+      },
+      "expectimax": {
+        "policy": "expectimax",
+        "wins": 30,
+        "games": 80,
+        "rate": 0.375,
+        "lower": 0.2769401625800477,
+        "upper": 0.484514771486096,
+        "msPerGame": 2076.391512812501,
+        "capped": 0,
+        "available": 404,
+        "used": 19,
+        "boosted": 75,
+        "attackedWhileBoosted": 60,
+        "aiSwitches": 75,
+        "aiSwitchByThing": {
+          "MOVE_MOONBLAST": 57,
+          "SWITCH": 18
+        }
+      },
+      "classification": "role<expectimax",
+      "logFiles": [
+        "role-TRAINER_DRAKE-attack.log"
+      ]
+    },
+    {
+      "key": "TRAINER_STEVEN-attack",
+      "trainer": "TRAINER_STEVEN",
+      "kind": "attack",
+      "role": {
+        "policy": "role",
+        "wins": 0,
+        "games": 80,
+        "rate": 0,
+        "lower": -3.469446951953614e-18,
+        "upper": 0.0458197362645751,
+        "msPerGame": 703.0141086875003,
+        "capped": 0,
+        "available": 72,
+        "used": 0,
+        "boosted": 0,
+        "attackedWhileBoosted": 0,
+        "aiSwitches": 0,
+        "aiSwitchByThing": {}
+      },
+      "expectimax": {
+        "policy": "expectimax",
+        "wins": 0,
+        "games": 80,
+        "rate": 0,
+        "lower": -3.469446951953614e-18,
+        "upper": 0.0458197362645751,
+        "msPerGame": 1304.8613822375003,
+        "capped": 0,
+        "available": 202,
+        "used": 0,
+        "boosted": 80,
+        "attackedWhileBoosted": 80,
+        "aiSwitches": 0,
+        "aiSwitchByThing": {}
+      },
+      "classification": "uninformative",
+      "logFiles": [
+        "role-TRAINER_STEVEN-attack.log"
+      ]
+    },
+    {
+      "key": "TRAINER_GLACIA-stall",
+      "trainer": "TRAINER_GLACIA",
+      "kind": "stall",
+      "role": {
+        "policy": "role",
+        "wins": 3,
+        "games": 80,
+        "rate": 0.0375,
+        "lower": 0.012834336300788757,
+        "upper": 0.10454891974394322,
+        "msPerGame": 2544.6521673874986,
+        "capped": 0,
+        "available": 304,
+        "used": 0,
+        "boosted": 224,
+        "attackedWhileBoosted": 224,
+        "aiSwitches": 0,
+        "aiSwitchByThing": {}
+      },
+      "expectimax": {
+        "policy": "expectimax",
+        "wins": 5,
+        "games": 80,
+        "rate": 0.0625,
+        "lower": 0.026988977697985535,
+        "upper": 0.1381032915335177,
+        "msPerGame": 5742.3895948374975,
+        "capped": 0,
+        "available": 452,
+        "used": 0,
+        "boosted": 185,
+        "attackedWhileBoosted": 92,
+        "aiSwitches": 5,
+        "aiSwitchByThing": {
+          "MOVE_ASTEROID_DOWNFALL": 4,
+          "MOVE_FIRE_BLAST": 1
+        }
+      },
+      "classification": "uninformative",
+      "logFiles": [
+        "role-TRAINER_GLACIA-stall.log"
+      ]
+    }
+  ]
+}

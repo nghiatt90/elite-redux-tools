@@ -1,0 +1,44 @@
+{
+  "key": "TRAINER_GLACIA-stall",
+  "trainer": "TRAINER_GLACIA",
+  "kind": "stall",
+  "role": {
+    "policy": "role",
+    "wins": 3,
+    "games": 80,
+    "rate": 0.0375,
+    "lower": 0.012834336300788757,
+    "upper": 0.10454891974394322,
+    "msPerGame": 2544.6521673874986,
+    "capped": 0,
+    "available": 304,
+    "used": 0,
+    "boosted": 224,
+    "attackedWhileBoosted": 224,
+    "aiSwitches": 0,
+    "aiSwitchByThing": {}
+  },
+  "expectimax": {
+    "policy": "expectimax",
+    "wins": 5,
+    "games": 80,
+    "rate": 0.0625,
+    "lower": 0.026988977697985535,
+    "upper": 0.1381032915335177,
+    "msPerGame": 5742.3895948374975,
+    "capped": 0,
+    "available": 452,
+    "used": 0,
+    "boosted": 185,
+    "attackedWhileBoosted": 92,
+    "aiSwitches": 5,
+    "aiSwitchByThing": {
+      "MOVE_ASTEROID_DOWNFALL": 4,
+      "MOVE_FIRE_BLAST": 1
+    }
+  },
+  "classification": "uninformative",
+  "logFiles": [
+    "role-TRAINER_GLACIA-stall.log"
+  ]
+}

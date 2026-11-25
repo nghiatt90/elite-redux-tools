@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/rules-of-hooks -- useMove is the sim's action builder, not a React hook */
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, it } from 'vitest'
 
@@ -27,14 +27,61 @@ const REPORT_PATH = resolve(
   import.meta.dirname,
   '../../../../../docs/battle-sim/role-policy-gate-report.md',
 )
-const OUT_DIR = process.env.SIM_POLICY_OUT ?? resolve(import.meta.dirname, '../../../../test-results/role-policy')
-const OUT_LABEL = process.env.SIM_POLICY_OUT ?? 'web/test-results/role-policy'
+const OUT_DIR =
+  process.env.SIM_POLICY_OUT ??
+  resolve(import.meta.dirname, '../../../../../docs/battle-sim/role-policy-logs')
+const OUT_LABEL = process.env.SIM_POLICY_OUT ?? 'docs/battle-sim/role-policy-logs'
 
 const fixture = JSON.parse(readFileSync(FIXTURE_PATH, 'utf8')) as PolicyComparisonFixture
 
-describe.skipIf(process.env.SIM_POLICY !== '1')('policy comparison gate', () => {
-  const done: FightMeasurement[] = []
+function writeAtomic(path: string, contents: string): void {
+  const temp = `${path}.${process.pid}.tmp`
+  writeFileSync(temp, contents)
+  renameSync(temp, path)
+}
 
+/** Rebuilds the report from every per-fight JSON in OUT_DIR, in fixture order.
+ * A fight only counts once both policies have finished all GAMES games, so
+ * parallel per-fight processes can each call this as they finish. */
+function writeReport(): void {
+  const fights: FightMeasurement[] = []
+  for (const fight of fixture.fights) {
+    const path = resolve(OUT_DIR, `${fightKey(fight)}.json`)
+    if (!existsSync(path)) continue
+    const measurement = JSON.parse(readFileSync(path, 'utf8')) as FightMeasurement
+    if (measurement.role.games !== GAMES || measurement.expectimax.games !== GAMES) continue
+    fights.push(measurement)
+  }
+
+  mkdirSync(OUT_DIR, { recursive: true })
+  writeAtomic(
+    REPORT_PATH,
+    renderGateReport({
+      games: GAMES,
+      maxTurns: MAX_TURNS,
+      seedOffset: SEED_OFFSET,
+      logDir: OUT_LABEL,
+      fights,
+    }),
+  )
+  writeAtomic(
+    resolve(OUT_DIR, 'report.json'),
+    JSON.stringify(
+      {
+        source: fixture.source,
+        games: GAMES,
+        maxTurns: MAX_TURNS,
+        seedOffset: SEED_OFFSET,
+        z: 1.96,
+        fights,
+      },
+      null,
+      2,
+    ),
+  )
+}
+
+describe.skipIf(process.env.SIM_POLICY !== '1')('policy comparison gate', () => {
   for (const fight of fixture.fights) {
     it(fightKey(fight), { timeout: 36_000_000 }, () => {
       const data = loadSimData()
@@ -70,7 +117,7 @@ describe.skipIf(process.env.SIM_POLICY !== '1')('policy comparison gate', () => 
 
       const role = summarizePolicy('role', records.role)
       const expectimax = summarizePolicy('expectimax', records.expectimax)
-      done.push({
+      const measurement: FightMeasurement = {
         key,
         trainer: fight.trainer,
         kind: fight.kind,
@@ -78,33 +125,15 @@ describe.skipIf(process.env.SIM_POLICY !== '1')('policy comparison gate', () => 
         expectimax,
         classification: classifyWinRates(role.rate, expectimax.rate),
         logFiles: [logFile],
-      })
-
-      writeFileSync(
-        REPORT_PATH,
-        renderGateReport({
-          games: GAMES,
-          maxTurns: MAX_TURNS,
-          seedOffset: SEED_OFFSET,
-          logDir: OUT_LABEL,
-          fights: done,
-        }),
-      )
-      writeFileSync(
-        resolve(OUT_DIR, 'report.json'),
-        JSON.stringify(
-          {
-            source: fixture.source,
-            games: GAMES,
-            maxTurns: MAX_TURNS,
-            seedOffset: SEED_OFFSET,
-            z: 1.96,
-            fights: done,
-          },
-          null,
-          2,
-        ),
-      )
+      }
+      writeAtomic(resolve(OUT_DIR, `${key}.json`), JSON.stringify(measurement, null, 2))
+      writeReport()
     })
   }
+})
+
+describe.skipIf(process.env.SIM_POLICY !== 'render')('policy comparison gate report', () => {
+  it('rebuilds the report from the measured fights', () => {
+    writeReport()
+  })
 })
