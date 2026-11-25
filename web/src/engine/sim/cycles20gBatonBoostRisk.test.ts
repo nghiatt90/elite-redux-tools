@@ -273,6 +273,9 @@ describe('cycle s20g - support Baton Pass own-boost gate: check 2 (the turn-2 cl
     patchMon(allowed.state, 0, 0, { hp: 46 })
     expect(readPredictions(allowed, 50).threatened).toBe(true)
     expect(moveId(playTurn(allowed, 'support', {}, memory()))).toBe('MOVE_AGILITY')
+    // Agility resolved: BattleScript_EffectSpeedUp2 is `setstatchanger STAT_SPEED, 2, FALSE`
+    // (battle_scripts_1.s:4252), so our Speed stage is +2 after the turn.
+    expect(allowed.state.battlers[0]!.mon.statStages[STAT_SPEED]).toBe(DEFAULT_STAT_STAGE + 2)
 
     const control = session(supportTeam(AGILITY_TEAM), [mon('SPECIES_MACHAMP', ['MOVE_BODY_SLAM'])])
     patchMon(control.state, 0, 0, { hp: 46 })
@@ -426,6 +429,31 @@ describe('cycle s20g - the check does not touch the live session', () => {
     // bench mon in, so the live party index no longer matches (check 2's step 5).
     expect(probe.state.sides[0].party[0]!.hp).toBe(0)
     expect(probe.state.battlers[0]!.partyIndex).not.toBe(0)
+  })
+})
+
+describe('cycle s20g - move inventory evidence', () => {
+  it('11. Bullet Punch resolves on battler 1 for exactly its drawn roll', () => {
+    // Bullet Punch (40 BP, priority 1) is effect-less: the damage path is all there is.
+    // Machamp's Bullet Punch onto our full-HP level-50 Snorlax (maxHp 235) pins 24..29
+    // non-crit and 55..65 crit at a 1/8 crit denominator (Steel vs Normal is neutral).
+    // The accuracy check hits, Bullet Punch has no secondary effect to roll, and this
+    // seed's damage draw is 27 (one of the three 27s in the pinned row), so 235 - 27 =
+    // 208. End of turn, Snorlax's Self-Sufficient innate sees a damaged mon and heals
+    // trunc(maxHp / 16) = trunc(235 / 16) = 14 (abilities.cc:4041-4056,
+    // endTurn.ts:1183-1199), so the live HP is 208 + 14 = 222. The opponent's only
+    // move is Bullet Punch and gLastMoves records it, so no other move can spend that HP.
+    const s = session(supportTeam(AGILITY_TEAM), [mon('SPECIES_MACHAMP', ['MOVE_BULLET_PUNCH'])])
+    expect(s.state.battlers[0]!.mon.hp).toBe(235)
+    const range = attackRange(s, 'MOVE_BULLET_PUNCH')
+    expect(range.rolls).toEqual([24, 24, 25, 25, 25, 26, 26, 26, 26, 27, 27, 27, 28, 28, 28, 29])
+    expect(range.critRolls).toEqual([55, 55, 56, 57, 57, 58, 59, 59, 60, 61, 61, 62, 63, 63, 64, 65])
+    expect(range.critChanceDenominator).toBe(8)
+
+    playTurn(s, 'support', {}, memory())
+
+    expect(s.state.battlers[1]!.lastMove).toBe('MOVE_BULLET_PUNCH')
+    expect(s.state.battlers[0]!.mon.hp).toBe(222)
   })
 })
 

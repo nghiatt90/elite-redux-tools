@@ -107,9 +107,9 @@ line in `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c` (`--
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | `move-effect` | 888 | 880 | 2 | 2 | 0 | 6 |
 | `secondary-effect` | 314 | 299 | 15 | 15 | 0 | 0 |
-| `legacy-script` | 600 | 462 | 12 | 132 | 0 | 6 |
-| `effect-less` | 143 | 59 | 84 | 84 | 0 | 0 |
-| **total** | **1945** | **1700** | **113** | **233** | **0** | **12** |
+| `legacy-script` | 600 | 464 | 10 | 130 | 0 | 6 |
+| `effect-less` | 143 | 60 | 83 | 83 | 0 | 0 |
+| **total** | **1945** | **1703** | **110** | **230** | **0** | **12** |
 
 Unported includes registered-but-untested. C/script locations cited: 378.
 
@@ -178,7 +178,6 @@ has at least one of the group's moves (first 8 ids listed). Trainer ids are sort
 - `BattleScript_EffectSmokescreen` (unported): 1 move: `MOVE_SMOKESCREEN`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:12385; 2 elite-tier trainers: `TRAINER_KEIGO`, `TRAINER_RILEY`
 - `BattleScript_EffectSolarbeam` (unported): 2 moves: `MOVE_SOLAR_BEAM`, `MOVE_SOLAR_BLADE`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:5706; 79 elite-tier trainers (first 8): `TRAINER_ALEXA`, `TRAINER_AUTUMN`, `TRAINER_BLUNDER`, `TRAINER_BRAXTON`, `TRAINER_BRENDAN_LILYCOVE_MUDKIP`, `TRAINER_BRENT`, `TRAINER_BRYANT`, `TRAINER_CAMERON_1`
 - `BattleScript_EffectSpecialAttackUp2` (registered, untested): 1 move: `MOVE_NASTY_PLOT`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4256; 56 elite-tier trainers (first 8): `TRAINER_ALIX`, `TRAINER_ANNA_AND_MEG_4`, `TRAINER_BECK`, `TRAINER_BENJAMIN_1`, `TRAINER_BERNIE_2`, `TRAINER_BRAWLY_5`, `TRAINER_BROOKE_1`, `TRAINER_CELIA`
-- `BattleScript_EffectSpeedUp2` (registered, untested): 2 moves: `MOVE_AGILITY`, `MOVE_ROCK_POLISH`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4252; 35 elite-tier trainers (first 8): `TRAINER_ALLEN`, `TRAINER_AMANDA`, `TRAINER_BENJAMIN_2`, `TRAINER_BRENDAN_RUSTBORO_TREECKO`, `TRAINER_BRIDGET`, `TRAINER_CALE`, `TRAINER_CINDY_1`, `TRAINER_CLAUDE`
 - `BattleScript_EffectSpicyExtract` (unported): 1 move: `MOVE_SPICY_EXTRACT`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:5155; 1 elite-tier trainer: `TRAINER_JEFF`
 - `BattleScript_EffectSweetKiss` (unported): 1 move: `MOVE_SWEET_KISS`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4202; 1 elite-tier trainer: `TRAINER_DUNCAN`
 - `BattleScript_EffectTailwind` (unported): 1 move: `MOVE_TAILWIND`; pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:2693; 34 elite-tier trainers (first 8): `TRAINER_AARON`, `TRAINER_ACE_TRAINER_LEELA`, `TRAINER_ALEX`, `TRAINER_AMY_AND_LIV_1`, `TRAINER_ANGELINA`, `TRAINER_ANNA_AND_MEG_1`, `TRAINER_BECKY`, `TRAINER_BRAWLY_4`
@@ -202,7 +201,7 @@ One line per unit. Move count is the number of distinct moves carrying the unit 
 15, collapsed past that); trainer counts are **elite-tier only** -- the number of trainers whose elite party
 has at least one of the group's moves (first 8 ids listed). Trainer ids are sorted.
 
-- `<effect-less>` (registered, untested): 84 moves (first 15): `MOVE_ACCELEROCK`, `MOVE_ASTEROID_DOWNFALL`, `MOVE_ASTRAL_BARRAGE`, `MOVE_BLAST_BURN`, `MOVE_BLOOD_MOON`, `MOVE_BRUTAL_SWING`, `MOVE_BULLET_PUNCH`, `MOVE_CLAY_DART`, `MOVE_CORROSIVE_GAS`, `MOVE_DAZZLING_GLEAM`, `MOVE_DIAMOND_ARROW`, `MOVE_DISARMING_VOICE`, `MOVE_DRAKE_MISSILE`, `MOVE_DYNAMAX_CANNON`, `MOVE_ENERGY_WAVE`; 454 elite-tier trainers (first 8): `BRENDAN_MUDKIP_METEOR_FALLS`, `BRENDAN_TORCHIC_METEOR_FALLS`, `BRENDAN_TREECKO_METEOR_FALLS`, `MAY_MUDKIP_METEOR_FALLS`, `MAY_TORCHIC_METEOR_FALLS`, `MAY_TREECKO_METEOR_FALLS`, `TRAINER_ABIGAIL_1`, `TRAINER_ACE_TRAINER_MIKE`
+- `<effect-less>` (registered, untested): 83 moves (first 15): `MOVE_ACCELEROCK`, `MOVE_ASTEROID_DOWNFALL`, `MOVE_ASTRAL_BARRAGE`, `MOVE_BLAST_BURN`, `MOVE_BLOOD_MOON`, `MOVE_BRUTAL_SWING`, `MOVE_CLAY_DART`, `MOVE_CORROSIVE_GAS`, `MOVE_DAZZLING_GLEAM`, `MOVE_DIAMOND_ARROW`, `MOVE_DISARMING_VOICE`, `MOVE_DRAKE_MISSILE`, `MOVE_DYNAMAX_CANNON`, `MOVE_ENERGY_WAVE`, `MOVE_ETERNABEAM`; 426 elite-tier trainers (first 8): `BRENDAN_MUDKIP_METEOR_FALLS`, `BRENDAN_TORCHIC_METEOR_FALLS`, `BRENDAN_TREECKO_METEOR_FALLS`, `MAY_MUDKIP_METEOR_FALLS`, `MAY_TORCHIC_METEOR_FALLS`, `MAY_TREECKO_METEOR_FALLS`, `TRAINER_ABIGAIL_1`, `TRAINER_ACE_TRAINER_MIKE`
 
 ## Allowlisted Pairs
 

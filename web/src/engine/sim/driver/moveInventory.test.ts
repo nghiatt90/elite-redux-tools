@@ -102,8 +102,15 @@ const DISTINCT_SCRIPTS = 322
  *
  * Cycle s20b2: 234 -> 233. `cycle947RolePolicyC.test.ts` runs `MOVE_CALM_MIND`, so
  * `BattleScript_EffectCalmMind` (`battle_scripts_1.s:6739`) leaves registered-untested.
+ *
+ * Cycle s20g: 233 -> 230. `cycles20gBatonBoostRisk.test.ts` runs `MOVE_AGILITY` and
+ * asserts our Speed is `DEFAULT_STAT_STAGE + 2` afterwards (test 5), so
+ * `BattleScript_EffectSpeedUp2` (`battle_scripts_1.s:4252`) really resolved; the shared
+ * script credits Rock Polish too. Test 11 executes `MOVE_BULLET_PUNCH` (the opponent's
+ * last move, with our HP pinned to the drawn roll), so Bullet Punch's effect-less pair
+ * leaves unported as well.
  */
-export const UNPORTED_PAIR_COUNT = 233
+export const UNPORTED_PAIR_COUNT = 230
 
 /**
  * Pinned today -- this number should only go DOWN. Cycle 151b rework 2: 124 -> 1315. The
@@ -132,8 +139,14 @@ export const UNPORTED_PAIR_COUNT = 233
  * Cycle s20b2: 114 -> 113 (the same pair also leaves unported, 234 -> 233).
  * `cycle947RolePolicyC.test.ts` runs `MOVE_CALM_MIND`, so `BattleScript_EffectCalmMind`
  * (`battle_scripts_1.s:6739`) is now test-backed rather than registered-but-untested.
+ *
+ * Cycle s20g: 113 -> 110 (the same three pairs also leave unported, 233 -> 230).
+ * `cycles20gBatonBoostRisk.test.ts` proves `BattleScript_EffectSpeedUp2`
+ * (`battle_scripts_1.s:4252`) by running `MOVE_AGILITY` and asserting the +2 Speed stage;
+ * because the script is shared, Rock Polish's pair is test-backed too. Test 11 runs
+ * `MOVE_BULLET_PUNCH`, so that effect-less pair is test-backed as well.
  */
-export const REGISTERED_UNTESTED_PAIR_COUNT = 113
+export const REGISTERED_UNTESTED_PAIR_COUNT = 110
 
 /** Pinned today at 0 -- this number should only go DOWN. */
 export const UNCLASSIFIED_PAIR_COUNT = 0
