@@ -21,7 +21,7 @@ import type { AiDamageRolls } from '../ai/aiCalcDamage'
 import { aiDamageRolls } from '../ai/aiCalcDamage'
 import { DEFAULT_STAT_STAGE, STAT_ATK, STATUS_FIELD_TERRAIN_ANY } from '../constants'
 import { canBattlerEscape, isAbilityPreventingEscape, type EscapeDeps } from '../escape'
-import type { BattleState } from '../state'
+import type { BattleState, BattlerState } from '../state'
 import { battlerHasSimAbility } from '../statBuffs'
 import { applySwitchInAbilities, type BattleStartDeps } from '../switchInAbility'
 import { buildTurnOrderContext } from '../turn'
@@ -882,9 +882,14 @@ export function createTeamLayer(config: {
 
   const roles = config.roles
   const roleParams = config.roleParams
-  // Per-party-index role memory, created on first use and persisted across the
-  // battle (the same object `chooseRoleAction` mutates).
-  const memories = new Map<number, RoleMemory>()
+  // Role memory belongs to one battler OBJECT, not a party index: every
+  // switch-in builds a fresh battler (`state.battlers[battlerId] = newBattler`,
+  // switchIn.ts:232) and the game clears the last move there
+  // (`gLastResultingMoves[gActiveBattler] = 0`, battle_main.c:2903). An identity
+  // check also covers a faint replacement, a new game on a reused layer, and a
+  // mon that left and came back between two calls with an unchanged party index.
+  let memoryOwner: BattlerState | null = null
+  let memory: RoleMemory = { turn: 0, lastMove: null }
 
   // The replacement callback receives only the state (session.ts:268-274), so
   // the last session `policy` saw is kept here and the faint's state is spliced
@@ -926,6 +931,11 @@ export function createTeamLayer(config: {
     observePpLoopStall(session, turn)
     const active = session.state.battlers[0]
     if (!active || active.mon.hp <= 0) return null
+    // A new battler object means a switch-in: start the memory over.
+    if (active !== memoryOwner) {
+      memoryOwner = active
+      memory = { turn: 0, lastMove: null }
+    }
     // One prediction per call, at the role layer's own safety line, shared by
     // every purpose (decision 14: the same view feeds every rule).
     const view = readPredictions(session, DEFAULT_SAFETY_PCT)
@@ -954,17 +964,16 @@ export function createTeamLayer(config: {
           break
       }
       if (choice) {
+        // A purpose-decided move is this battler's last move too, or the next
+        // call's `usedProtectionLastTurn` fallback would see the stale one.
+        memory.turn = session.state.turnCount + 1
+        memory.lastMove = moveIdOf(choice)
         trace.push({ turn, choice: describePurpose(purpose, choice), tags: ['team', purpose] })
         return choice
       }
     }
 
     const partyIndex = active.partyIndex
-    let memory = memories.get(partyIndex)
-    if (!memory) {
-      memory = { turn: 0, lastMove: null }
-      memories.set(partyIndex, memory)
-    }
     return chooseRoleAction(
       session,
       roles[partyIndex] ?? 'attacker',
