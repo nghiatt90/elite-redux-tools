@@ -1103,14 +1103,14 @@ export function blocksStatusMove(
 
   if (skipImmunityScan) {
     if (resolvedType === 'DARK' && !attackerHasMoldBreaker) {
-      const oppId = attackerId ^ 1
-      if (isBattlerAlive(state, oppId)) {
-        const oppBattler = state.battlers[oppId]
-        if (oppBattler) {
-          const oppUnsuppressedSlots = getUnsuppressedSlots(state, oppBattler, attackerId, deps.dataContext)
-          if (battlerHasAbility(oppUnsuppressedSlots, 'ABILITY_RADIANCE', () => false)) {
-            return true
-          }
+      // TestImmunityAbilities (battle_util.c:8953-8968): Radiance has APPLY_ON_ANY, tested across all live battlers.
+      for (let id = 0; id < state.battlersCount; id++) {
+        if (id === attackerId || !isBattlerAlive(state, id)) continue
+        const battler = state.battlers[id]
+        if (!battler) continue
+        const unsuppressedSlots = getUnsuppressedSlots(state, battler, attackerId, deps.dataContext)
+        if (battlerHasAbility(unsuppressedSlots, 'ABILITY_RADIANCE', () => false)) {
+          return true
         }
       }
     }
