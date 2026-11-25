@@ -201,10 +201,14 @@ export interface BoostingCounters {
   available: number
   /** Turns where the chosen move is a boosting move. */
   used: number
-  /** Turns where the active mon at decision time has any of stat stages 1..5 above neutral. */
+  /** Turns where our active mon at decision time has any of stat stages 1..5 above
+   * neutral AND has itself used a boosting move since its current switch-in. */
   boosted: number
   /** Boosted turns where the chosen move's split is not STATUS. */
   attackedWhileBoosted: number
+  /** Turns where the active mon at decision time has any of stat stages 1..5 above
+   * neutral, whatever raised them (passive raises and Baton-Passed stages included). */
+  positiveStage: number
 }
 
 export interface ActiveView {
@@ -253,6 +257,13 @@ interface PendingCapture {
   playerPartySpecies: (string | null)[]
   opponentPartySpecies: (string | null)[]
   boosted: boolean
+  /** True when the active mon came in since the previous decision: a freshly
+   * switched-in or replaced battler gets `isFirstTurn = 2` (switchIn.ts via
+   * createBattlerState), the battle-start and end-of-turn TurnValuesCleanUp
+   * decrement it once, so it is nonzero at a decision exactly on the first
+   * decision after the mon entered (turn 1, a voluntary switch, Baton Pass, a
+   * forced switch or a faint replacement). */
+  switchedIn: boolean
   hasBoostingChoice: boolean
   boostingIds: Set<string>
   trace: PolicyTraceEntry[]
@@ -301,6 +312,7 @@ function captureTurn(session: BattleSession, turn: number): PendingCapture {
     playerPartySpecies: state.sides[0].party.map((mon) => mon?.speciesId ?? null),
     opponentPartySpecies: state.sides[1].party.map((mon) => mon?.speciesId ?? null),
     boosted: isBoosted(active),
+    switchedIn: (active?.volatiles.isFirstTurn ?? 0) !== 0,
     hasBoostingChoice,
     boostingIds,
     trace: [],
@@ -311,10 +323,17 @@ function captureTurn(session: BattleSession, turn: number): PendingCapture {
  * `onTurn` as its `onTurn` hook. The wrapper only reads the session (legal
  * choices are pure), so it consumes no RNG and mutates nothing. */
 export function createPolicyObserver(options: { collectLog?: boolean } = {}): PolicyObserver {
-  const counters: BoostingCounters = { available: 0, used: 0, boosted: 0, attackedWhileBoosted: 0 }
+  const counters: BoostingCounters = {
+    available: 0,
+    used: 0,
+    boosted: 0,
+    attackedWhileBoosted: 0,
+    positiveStage: 0,
+  }
   const aiSwitchSummary = { total: 0, byThing: {} as Record<string, number> }
   const turns: ObservedTurn[] = []
   let pending: PendingCapture | null = null
+  let ownBoostSinceSwitchIn = false
 
   const wrap = (policy: PolicyFn): PolicyFn => (session, turn, trace) => {
     const before = trace.length
@@ -334,12 +353,33 @@ export function createPolicyObserver(options: { collectLog?: boolean } = {}): Po
         ? (choice.action.chosenMove?.id ?? choice.action.moveToBeUsed?.id ?? null)
         : null
 
+    if (captured.switchedIn) ownBoostSinceSwitchIn = false
+
     if (captured.activeAlive && captured.hasBoostingChoice) counters.available++
     if (chosenMoveId && captured.boostingIds.has(chosenMoveId)) counters.used++
     if (captured.boosted) {
-      counters.boosted++
-      const split = chosenMoveId ? captured.data.dataContext.move(chosenMoveId)?.split : null
-      if (chosenMoveId && split !== 'STATUS') counters.attackedWhileBoosted++
+      counters.positiveStage++
+      if (ownBoostSinceSwitchIn) {
+        counters.boosted++
+        const split = chosenMoveId ? captured.data.dataContext.move(chosenMoveId)?.split : null
+        if (chosenMoveId && split !== 'STATUS') counters.attackedWhileBoosted++
+      }
+    }
+
+    // Set the flag from what actually executed, not from what was chosen: a
+    // flinched or otherwise cancelled boost must not make later turns "boosted".
+    const playerAction = step.outcome.actions.find(
+      (action) => action.battlerId === 0 && action.action === 'USE_MOVE',
+    )
+    if (
+      chosenMoveId &&
+      captured.boostingIds.has(chosenMoveId) &&
+      playerAction &&
+      playerAction.cancelledBy === null &&
+      !playerAction.skippedBecauseFainted &&
+      !playerAction.battleOver
+    ) {
+      ownBoostSinceSwitchIn = true
     }
 
     if (step.chosenActions[1]?.action === 'SWITCH') {
@@ -393,6 +433,7 @@ export interface ComparisonGameRecord {
   used: number
   boosted: number
   attackedWhileBoosted: number
+  positiveStage: number
   aiSwitches: number
   aiSwitchByThing: Record<string, number>
   playerPartyHp: number[]
@@ -469,6 +510,7 @@ export function playComparisonGame(
     used: observer.counters.used,
     boosted: observer.counters.boosted,
     attackedWhileBoosted: observer.counters.attackedWhileBoosted,
+    positiveStage: observer.counters.positiveStage,
     aiSwitches: observer.aiSwitchSummary.total,
     aiSwitchByThing: { ...observer.aiSwitchSummary.byThing },
     playerPartyHp: partyHp(result.session, 0),
@@ -635,6 +677,8 @@ export interface PolicySummary {
   used: number
   boosted: number
   attackedWhileBoosted: number
+  /** Optional because the committed per-fight JSON files of the first run predate it. */
+  positiveStage?: number
   aiSwitches: number
   aiSwitchByThing: Record<string, number>
 }
@@ -668,6 +712,7 @@ export function summarizePolicy(
     used: total((record) => record.used),
     boosted: total((record) => record.boosted),
     attackedWhileBoosted: total((record) => record.attackedWhileBoosted),
+    positiveStage: total((record) => record.positiveStage),
     aiSwitches: total((record) => record.aiSwitches),
     aiSwitchByThing,
   }
@@ -726,6 +771,11 @@ export function renderGateReport(input: GateReportInput): string {
   lines.push('- Fixture: `docs/battle-sim/role-policy-test-fights.json`')
   lines.push('')
 
+  const hasLegacySummary = input.fights.some(
+    (fight) =>
+      fight.role.positiveStage === undefined || fight.expectimax.positiveStage === undefined,
+  )
+
   lines.push('## Definitions', '')
   lines.push(
     '- A game counts as won only on `WON`; a capped game (`MAX_TURNS`) counts as not won.',
@@ -738,11 +788,19 @@ export function renderGateReport(input: GateReportInput): string {
   )
   lines.push('- `used`: turns where the chosen move is a boosting move.')
   lines.push(
-    '- `boosted`: turns where our active mon at decision time has any of stat stages 1..5 above neutral.',
+    '- `boosted`: turns where our active mon at decision time has any of stat stages 1..5 above neutral and has itself used a boosting move since its current switch-in.',
   )
   lines.push(
     '- `attacked while boosted`: boosted turns where the chosen move\'s split is not STATUS.',
   )
+  lines.push(
+    '- `any positive stage`: turns where our active mon at decision time has any of stat stages 1..5 above neutral, whatever raised them (passive raises and Baton-Passed stages included).',
+  )
+  if (hasLegacySummary) {
+    lines.push(
+      '- Measurements without an `Any positive stage` value predate the own-boost definition: their `Boosted` and `Attacked boosted` count any positive stage in stats 1..5, passive and Baton-Passed raises included.',
+    )
+  }
   lines.push(
     '- AI voluntary switches: turns where the AI\'s selection-time action is `SWITCH`, broken down by what our policy did that turn (a move id, `SWITCH`, or `NONE`). Replacements after a faint and pivot moves are not counted.',
   )
@@ -767,9 +825,10 @@ export function renderGateReport(input: GateReportInput): string {
       'Used',
       'Boosted',
       'Attacked boosted',
+      'Any positive stage',
     ]),
   )
-  lines.push(tableRow(Array(13).fill('---')))
+  lines.push(tableRow(Array(14).fill('---')))
   for (const fight of input.fights) {
     for (const summary of [fight.role, fight.expectimax]) {
       lines.push(
@@ -779,7 +838,7 @@ export function renderGateReport(input: GateReportInput): string {
           String(summary.wins),
           String(summary.games),
           pct(summary.rate),
-          summary.lower.toFixed(3),
+          Math.max(0, summary.lower).toFixed(3),
           summary.upper.toFixed(3),
           summary.msPerGame.toFixed(1),
           String(summary.capped),
@@ -787,6 +846,7 @@ export function renderGateReport(input: GateReportInput): string {
           String(summary.used),
           String(summary.boosted),
           String(summary.attackedWhileBoosted),
+          summary.positiveStage === undefined ? '-' : String(summary.positiveStage),
         ]),
       )
     }
@@ -818,6 +878,29 @@ export function renderGateReport(input: GateReportInput): string {
       tableRow([fight.key, pct(fight.role.rate), pct(fight.expectimax.rate), fight.classification]),
     )
   }
+  lines.push('')
+
+  const wilsonText = (summary: PolicySummary): string =>
+    `[${Math.max(0, summary.lower).toFixed(3)}, ${summary.upper.toFixed(3)}]`
+  const informative = input.fights.filter((fight) => fight.classification !== 'uninformative')
+  const roleBehind = input.fights.filter((fight) => fight.classification === 'role<expectimax')
+  lines.push('## Informative fights where the role policy wins less often', '')
+  lines.push(`Informative fights (classification other than \`uninformative\`): ${informative.length}.`, '')
+  if (roleBehind.length === 0) {
+    lines.push('No informative fight has the role policy winning less often than expectimax.')
+  } else {
+    for (const fight of roleBehind) {
+      const disjoint =
+        fight.role.upper < fight.expectimax.lower || fight.expectimax.upper < fight.role.lower
+      lines.push(
+        `- ${fight.key}: role ${fight.role.wins}/${fight.role.games}, Wilson ${wilsonText(fight.role)}; expectimax ${fight.expectimax.wins}/${fight.expectimax.games}, Wilson ${wilsonText(fight.expectimax)}; intervals ${disjoint ? 'do not overlap' : 'overlap'}.`,
+      )
+    }
+  }
+  lines.push('')
+  lines.push(
+    'This checks only the "at least as often as expectimax on every informative fight" part of Step 2.0b. "Clearly more" on the stall fight and where Mr. Mime\'s boosts decide, and the reading of the battle logs, are not evaluated here; no overall verdict is given.',
+  )
   lines.push('')
 
   lines.push('## Battle logs', '')

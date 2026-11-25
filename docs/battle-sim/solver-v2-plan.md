@@ -666,14 +666,16 @@ Run settings: 80 games per policy per fight, 200-turn cap, seed offset 0, measur
 | TRAINER_SIDNEY-attack | expectimax | 71/80 | 88.8% | [0.800, 0.940] | 2017.6 | 0 | 298/100 | 218 / 141 |
 | TRAINER_PHOEBE-attack | role | 60/80 | 75.0% | [0.645, 0.832] | 1086.1 | 0 | 40/0 | 0 / 0 |
 | TRAINER_PHOEBE-attack | expectimax | 15/80 | 18.8% | [0.117, 0.287] | 1575.5 | 0 | 276/4 | 10 / 10 |
-| TRAINER_GLACIA-attack | role | 0/80 | 0.0% | [-0.000, 0.046] | 1034.2 | 0 | 105/0 | 1 / 1 |
-| TRAINER_GLACIA-attack | expectimax | 0/80 | 0.0% | [-0.000, 0.046] | 1601.3 | 0 | 307/38 | 123 / 94 |
+| TRAINER_GLACIA-attack | role | 0/80 | 0.0% | [0.000, 0.046] | 1034.2 | 0 | 105/0 | 1 / 1 |
+| TRAINER_GLACIA-attack | expectimax | 0/80 | 0.0% | [0.000, 0.046] | 1601.3 | 0 | 307/38 | 123 / 94 |
 | TRAINER_DRAKE-attack | role | 2/80 | 2.5% | [0.007, 0.087] | 863.2 | 0 | 100/0 | 0 / 0 |
 | TRAINER_DRAKE-attack | expectimax | 30/80 | 37.5% | [0.277, 0.485] | 2076.4 | 0 | 404/19 | 75 / 60 |
-| TRAINER_STEVEN-attack | role | 0/80 | 0.0% | [-0.000, 0.046] | 703.0 | 0 | 72/0 | 0 / 0 |
-| TRAINER_STEVEN-attack | expectimax | 0/80 | 0.0% | [-0.000, 0.046] | 1304.9 | 0 | 202/0 | 80 / 80 |
+| TRAINER_STEVEN-attack | role | 0/80 | 0.0% | [0.000, 0.046] | 703.0 | 0 | 72/0 | 0 / 0 |
+| TRAINER_STEVEN-attack | expectimax | 0/80 | 0.0% | [0.000, 0.046] | 1304.9 | 0 | 202/0 | 80 / 80 |
 | TRAINER_GLACIA-stall | role | 3/80 | 3.8% | [0.013, 0.105] | 2544.7 | 0 | 304/0 | 224 / 224 |
 | TRAINER_GLACIA-stall | expectimax | 5/80 | 6.3% | [0.027, 0.138] | 5742.4 | 0 | 452/0 | 185 / 92 |
+
+Boosted / attacked boosted in this run count any positive stage in stats 1..5 (passive and Baton-Passed raises included); cycles20eb narrows the definition to the mon's own boosting from the next run.
 
 AI voluntary switches (turn counts; what our policy did on those turns):
 
@@ -696,9 +698,9 @@ Per-fight verdict as the rule gives it (from `classifyWinRates`; `uninformative`
 
 - `TRAINER_SIDNEY-attack`: `role<expectimax`; intervals do not overlap.
 - `TRAINER_PHOEBE-attack`: `role>=expectimax`; intervals do not overlap.
-- `TRAINER_GLACIA-attack`: `uninformative`; intervals overlap ([-0.000, 0.046] both).
+- `TRAINER_GLACIA-attack`: `uninformative`; intervals overlap ([0.000, 0.046] both).
 - `TRAINER_DRAKE-attack`: `role<expectimax`; intervals do not overlap.
-- `TRAINER_STEVEN-attack`: `uninformative`; intervals overlap ([-0.000, 0.046] both).
+- `TRAINER_STEVEN-attack`: `uninformative`; intervals overlap ([0.000, 0.046] both).
 - `TRAINER_GLACIA-stall`: `uninformative`; intervals overlap ([0.013, 0.105] vs [0.027, 0.138]).
 
 Battle logs: `docs/battle-sim/role-policy-logs/role-TRAINER_SIDNEY-attack.log`, `role-TRAINER_PHOEBE-attack.log`, `role-TRAINER_GLACIA-attack.log`, `role-TRAINER_DRAKE-attack.log`, `role-TRAINER_STEVEN-attack.log`, `role-TRAINER_GLACIA-stall.log` (role games 1 and 2 of each fight).
