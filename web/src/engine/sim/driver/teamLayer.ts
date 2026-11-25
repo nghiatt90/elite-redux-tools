@@ -40,7 +40,7 @@ import { battlerHasSimAbility, isBattlerWeatherAffected } from '../statBuffs'
 import { applySwitchInAbilities, type BattleStartDeps } from '../switchInAbility'
 import { canBeBurned, canBeParalyzed, canBleed, canGetFrostbite } from '../statusEffects'
 import { blocksStatusMove, buildTurnOrderContext } from '../turn'
-import { getMoveSpeed } from '../turnOrder'
+import { getMoveSpeed, type ChosenAction } from '../turnOrder'
 import type { PlayerChoice } from './expectimax'
 import { legalChoices } from './expectimax'
 import type { PolicyTraceEntry } from './policyBattle'
@@ -206,6 +206,30 @@ function benchOutspeedsTheirActive(session: BattleSession, slot: number): boolea
   const ours = getMoveSpeed(probe.state, 0, null, true, ctx, probe.data.statStageRatios).comparable
   const theirs = getMoveSpeed(probe.state, 1, null, true, ctx, probe.data.statStageRatios).comparable
   return ours > theirs
+}
+
+/** Whether the bench candidate has SOME ONE move that outspeeds their predicted
+ * action with heavy damage (battle_main.c:4386 GetWhoStrikesFirst, priority from
+ * battle_main.c:4257 GetMovePriority). Unlike the switch-in ability ordering of
+ * battle_main.c:4551-4566, the counter turn's order includes move priority. */
+function benchFastHeavy(
+  session: BattleSession,
+  slot: number,
+  theirHp: number,
+  theirAction: ChosenAction | null,
+): boolean {
+  const reserve = session.state.sides[0].party[slot]
+  if (!reserve || reserve.speciesId === null) return false
+  const substituted = stateWithReserve(session.state, 0, reserve, slot)
+  const probe = cloneSession({ ...session, state: substituted }, SPEED_PROBE_SEED)
+  const moves = evaluateMoves(probe, null).filter(
+    (info) => info.range !== null && !info.range.isImmune,
+  )
+  return moves.some(
+    (info) =>
+      2 * meanRoll(info.range!) >= theirHp &&
+      outspeeds(probe, info.choice.action, theirAction),
+  )
 }
 
 /** The predicted AI moves of a 3-sample `predictAi`, in sample order, deduped.
@@ -619,7 +643,7 @@ function ruleCounter(
   // the two-hit KO. Priority rides on the action, so Extreme Speed counts as
   // outspeeding even from a slower mon. The damage test runs first so
   // `outspeeds` only probes when it can matter. The bench side uses the same
-  // test below.
+  // test below via benchFastHeavy (battle_main.c:4386).
   const activeFastHeavy = damaging.some(
     (info) =>
       2 * meanRoll(info.range!) >= theirHp &&
@@ -634,7 +658,7 @@ function ruleCounter(
     if (!scored) continue
     if (scored.incomingFraction * 100 > genes.switchInSafety) continue
     const koInTwo = 2 * scored.lowestRoll >= theirHp
-    const fastHeavy = scored.outspeeds && 2 * scored.meanRoll >= theirHp
+    const fastHeavy = benchFastHeavy(session, slot, theirHp, view.predictedAction)
     if (!koInTwo && !fastHeavy) continue
     candidates.push(scored)
   }
