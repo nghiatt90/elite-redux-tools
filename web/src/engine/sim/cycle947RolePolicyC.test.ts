@@ -32,7 +32,7 @@ import { legalChoices } from './driver/expectimax'
 import { loadSimData, type TrainerData, type TrainerMonData } from './driver/loadSimData'
 import type { PolicyTraceEntry } from './driver/policyBattle'
 import type { RoleMemory, RoleParams, RoleName } from './driver/rolePolicy'
-import { chooseRoleAction } from './driver/rolePolicy'
+import { chooseRoleAction, readPredictions } from './driver/rolePolicy'
 import type { BattleSession } from './driver/session'
 import { aiDamageDepsFor, beginTurn, createSession, stepTurn } from './driver/session'
 import { createRandomSource } from './rng'
@@ -184,15 +184,21 @@ describe('cycle 947 - support: Baton Pass boosts', () => {
     expect(s.state.battlers[0]!.mon.statStages[STAT_SPDEF]).toBe(DEFAULT_STAT_STAGE + 2)
   })
 
-  it('does not boost when threatened', () => {
-    // HP 80 makes Machamp's 46 threatening, so the safe-to-boost gate closes
-    // and the support falls through to its pivot hand-off.
+  it('boosts at a 50%-threatening HP once the KO risk is under 15% (s20g)', () => {
+    // Cycle s20g replaced the support's own-boost gate: `view.threatened` no
+    // longer refuses the boost, the KO probability does. At HP 80 Machamp's
+    // Body Slam still crosses the old 50% line (46 * 100 = 4600 > 50 * 80 =
+    // 4000, so threatened is true), but one hit reaches 80 only on the crit row
+    // (16/384 = 4.17% < 15%). The one-turn clone agrees: the forced v = 45 hit
+    // plus Snorlax's Self-Sufficient heal (maxHp / 16 = 14) leaves hpAfter 49,
+    // so turn 2 must remove 49 + 45 - a = 48..55 and only a crit reaches that.
+    // The support therefore boosts instead of pivoting.
     const s = session(batonParty(), [mon('SPECIES_MACHAMP', ['MOVE_BODY_SLAM'])])
     patchMon(s.state, 0, 0, { hp: 80 })
+    expect(readPredictions(s, 50).threatened).toBe(true)
     beginTurn(s)
     const choice = chooseRoleAction(s, 'support', {}, memory())
-    expect(moveId(choice)).not.toBe('MOVE_CALM_MIND')
-    expect(moveId(choice)).toBe('MOVE_BATON_PASS')
+    expect(moveId(choice)).toBe('MOVE_CALM_MIND')
   })
 })
 

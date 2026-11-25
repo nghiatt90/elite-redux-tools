@@ -526,6 +526,17 @@ export interface AiDamageRolls {
   /** Sum of every hit at each roll percentile for a multihit move; null for a
    * single-hit move. */
   totalRolls: number[] | null
+  /** calculateMoveDamage's `critChanceDenominator`: 1 is a guaranteed crit, a
+   * larger number means the crit lands on one draw in that many, null means the
+   * move/battler pair can never crit (see damageResolver.ts resolve, which
+   * draws `random16() % denominator === 0`). */
+  critChanceDenominator: number | null
+  /** Same shape as totalRolls with every hit forced to crit; null when the move
+   * is single-hit or can never crit. */
+  totalCritRolls: number[] | null
+  /** Bad Luck / Bad Omen force the game's 16-way roll to its worst entry
+   * (battle_util.c:7815-7821), so only `rolls[0]` is reachable. */
+  isForcedMinRoll: boolean
   isImmune: boolean
   unmodelled: string[]
 }
@@ -576,6 +587,9 @@ export function aiDamageRolls(
       rolls: Array.from({ length: 16 }, () => damage),
       critRolls: null,
       totalRolls: null,
+      critChanceDenominator: null,
+      totalCritRolls: null,
+      isForcedMinRoll: false,
       isImmune: result.isImmune,
       // This move's script is what fixedDamageFor ports, so its own "not modelled"
       // note is answered; every other note stays.
@@ -589,6 +603,9 @@ export function aiDamageRolls(
       rolls: Array.from({ length: 16 }, () => 0),
       critRolls: null,
       totalRolls: null,
+      critChanceDenominator: null,
+      totalCritRolls: null,
+      isForcedMinRoll: false,
       isImmune: result.isImmune,
       unmodelled: everyNote,
     }
@@ -597,6 +614,9 @@ export function aiDamageRolls(
     rolls: result.rolls,
     critRolls: result.critRolls,
     totalRolls: result.totalRolls,
+    critChanceDenominator: result.critChanceDenominator,
+    totalCritRolls: result.totalCritRolls,
+    isForcedMinRoll: result.isForcedMinRoll,
     isImmune: result.isImmune,
     unmodelled: everyNote,
   }

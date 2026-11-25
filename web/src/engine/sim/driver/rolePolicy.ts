@@ -15,10 +15,12 @@
 import { createBattlerState } from '../create'
 import type { AiDamageRolls } from '../ai/aiCalcDamage'
 import { aiDamageRolls } from '../ai/aiCalcDamage'
+import { calcKoChances } from '../../kochance'
 import {
   DEFAULT_STAT_STAGE,
   MAX_STAT_STAGE,
   MIN_STAT_STAGE,
+  PARTY_SIZE,
   SIDE_STATUS_AURORA_VEIL,
   SIDE_STATUS_LIGHTSCREEN,
   SIDE_STATUS_REFLECT,
@@ -69,13 +71,13 @@ import {
 } from '../statusEffects'
 import { blocksStatusMove, buildTurnOrderContext, getStatusMoveAbsorbingAbility } from '../turn'
 import type { ChosenAction } from '../turnOrder'
-import { getWhoStrikesFirst } from '../turnOrder'
+import { getMovePriority, getWhoStrikesFirst } from '../turnOrder'
 import type { PlayerChoice } from './expectimax'
 import { legalChoices } from './expectimax'
 import type { PolicyTraceEntry } from './policyBattle'
 import { guaranteedKo, ourDamageRange, pivotMoves, predictAi } from './policyInputs'
 import type { BattleSession } from './session'
-import { aiDamageDepsFor, cloneSession } from './session'
+import { aiDamageDepsFor, beginTurn, buildMoveAction, cloneSession, stepTurn } from './session'
 
 /** All six roles of decision 14: attacker, pivot, lead/hazard setter, set-up
  * sweeper, staller and support. */
@@ -112,6 +114,11 @@ export interface RoleMemory {
 // MODEL CHOICE: an incoming move that removes more than this percentage of our
 // current HP counts as threatening. 50 is decision 14's default, not a game fact.
 export const DEFAULT_SAFETY_PCT = 50
+// MODEL CHOICE (s20g driver policy, not a gene): the support's own-boost step
+// boosts only when the chance it is KOed this turn -- or by two hits over this
+// turn and the next -- is strictly below this. Fixed by the project owner
+// (2026-11-26), see docs/battle-sim/solver-v2-plan.md decision 14.
+const BATON_BOOST_KO_RISK = 0.15
 // MODEL CHOICE: decision 14's own defaults for the two new roles.
 const DEFAULT_TARGET_STAGE = 2
 const DEFAULT_HEAL_THRESHOLD = 50
@@ -1385,11 +1392,259 @@ export function supportEffectPending(session: BattleSession, view: PredictionVie
   return chooseSupportSetter(session, evaluateMoves(session, null), view) !== null
 }
 
-/** Own boosts for Baton Pass: while below the target stage, safe (the
- * setupSweeper's gate) and able to pass to a live bench slot, use a legal
- * self-boost move. Once at the target stage the pivot hand-off below carries
- * the stages across with Baton Pass (turn.ts:1905-1930, handleBatonPass
- * moveEffects.ts:10437+). */
+/** The sim's damage distribution for one move as an equiprobable multiset, the
+ * shape `calcKoChances` takes. Mirrors damageResolver.ts `resolve`
+ * (:299-316): the crit is drawn with probability `1/critChanceDenominator`
+ * (null = never, 1 = always), then one of the 16 rolls; Bad Luck / Bad Omen
+ * forces the minimum (`isForcedMinRoll`); a multi-hit move uses the summed
+ * `totalRolls` / `totalCritRolls`. A status move (`range === null`) and an
+ * immune target both deal 0. */
+function damageDistribution(range: AiDamageRolls | null): number[] {
+  if (!range || range.isImmune) return [0]
+  const nonRolls = range.totalRolls ?? range.rolls
+  const critRolls = range.totalRolls ? range.totalCritRolls : range.critRolls
+  const non = range.isForcedMinRoll ? [nonRolls[0]!] : nonRolls
+  const crit = critRolls === null ? null : range.isForcedMinRoll ? [critRolls[0]!] : critRolls
+  const denominator = range.critChanceDenominator
+  if (denominator === null || crit === null) return [...non]
+  if (denominator === 1) return [...crit]
+  const multiset: number[] = []
+  for (let i = 0; i < denominator - 1; i++) multiset.push(...non)
+  multiset.push(...crit)
+  return multiset
+}
+
+function maxDamage(distribution: number[]): number {
+  let max = 0
+  for (const value of distribution) if (value > max) max = value
+  return max
+}
+
+/** P(a hit KOs a battler at `hp`), read from the distribution itself. hp <= 0
+ * is already a KO (calcKoChances returns [] there). */
+function koProbability(distribution: number[], hp: number): number {
+  if (hp <= 0) return 1
+  return calcKoChances(distribution, hp, 1)[0]?.probability ?? 0
+}
+
+/** Every move in battler 1's four slots that really has positive priority and
+ * can damage battler 0. `getMovePriority` (turnOrder.ts:392) applies the
+ * ability priority bonuses, unlike moves.json's declared `priority`. "Can
+ * damage" means a non-null, non-immune range with a positive value. */
+function priorityDamagers(session: BattleSession): number[][] {
+  const mon = session.state.battlers[1]?.mon
+  if (!mon) return []
+  const deps = aiDamageDepsFor(session.data, session.state, session.inverseBattle)
+  const result: number[][] = []
+  for (let slot = 0; slot < mon.moves.length; slot++) {
+    const moveId = mon.moves[slot]
+    if (!moveId || (mon.pp[slot] ?? 0) <= 0) continue
+    const action = buildMoveAction(session.state, session.data, 1, moveId, session.turnDeps.damage)
+    if (!action.chosenMove) continue
+    if (getMovePriority(session.state, 1, action.chosenMove, 0) <= 0) continue
+    const distribution = damageDistribution(aiDamageRolls(session.state, moveId, 1, 0, deps))
+    if (maxDamage(distribution) <= 0) continue
+    result.push(distribution)
+  }
+  return result
+}
+
+/** Check 1, turn 1 on the live session: every predicted USE_MOVE, and every
+ * real-priority move in the opponent's slots that can damage us, must have a
+ * KO probability below the gate. A SWITCH sample is safe (decision 14); its
+ * priority scan runs regardless. `predictAi` clones, so the live state and RNG
+ * never move. Accuracy is not discounted: a hit is assumed to land. */
+function firstTurnKoRiskSafe(session: BattleSession, hp: number): boolean {
+  const deps = aiDamageDepsFor(session.data, session.state, session.inverseBattle)
+  for (const sample of predictAi(session, SAMPLE_COUNT, PREDICTION_SEED)) {
+    const action = sample.action
+    if (!action || action.action !== 'USE_MOVE') continue
+    const moveId = action.chosenMove?.id ?? action.moveToBeUsed?.id ?? null
+    if (!moveId) continue
+    const distribution = damageDistribution(aiDamageRolls(session.state, moveId, 1, 0, deps))
+    if (koProbability(distribution, hp) >= BATON_BOOST_KO_RISK) return false
+  }
+  for (const distribution of priorityDamagers(session)) {
+    if (koProbability(distribution, hp) >= BATON_BOOST_KO_RISK) return false
+  }
+  return true
+}
+
+interface SecondTurnRun {
+  action: ChosenAction | null
+  switchSlot: number | null
+  /** The turn-1 predicted move's damage distribution (equal weights). */
+  distribution: number[]
+}
+
+/** Check 2, turn 2 on a clone. `v` is the highest damage value that still has
+ * MORE than BATON_BOOST_KO_RISK probability of being met or exceeded: with n
+ * equiprobable values sorted ascending, k = floor(risk * n) + 1 and
+ * v = sorted[n - k] (16 rolls with no crit gives sorted[13], 3/16 = 18.75%;
+ * sorted[14] is only 12.5%). Not the maximum roll. */
+function highestProbableDamage(distribution: number[]): number {
+  const sorted = [...distribution].sort((a, b) => a - b)
+  const k = Math.floor(BATON_BOOST_KO_RISK * sorted.length) + 1
+  return sorted[sorted.length - k]!
+}
+
+/** Steps one clone of the session for turn 1 with the predicted move's first
+ * hit forced to `v` (later hits of a multi-hit move to 0), then reports
+ * whether the wrapper saw the predicted hit at all. Everything else -- Sturdy,
+ * Focus Sash, secondaries, end of turn -- is the sim's own. */
+function buildProbeTurn(
+  session: BattleSession,
+  boost: MoveChoiceInfo,
+  run: SecondTurnRun,
+  v: number,
+  seed: number,
+): { probe: BattleSession; sawTargetCall: boolean } {
+  const probe = cloneSession(session, seed)
+  const original = probe.turnDeps.damage
+  let firstHitReplaced = false
+  let sawTargetCall = false
+  const wrapped: typeof original = {
+    ...original,
+    resolve(state, attackerId, targetId, action, context) {
+      const resolution = original.resolve(state, attackerId, targetId, action, context)
+      if (attackerId !== 1 || targetId !== 0) return resolution
+      sawTargetCall = true
+      if (resolution.targetDamage === null || resolution.targetDamage <= 0) return resolution
+      const targetDamage = firstHitReplaced ? 0 : v
+      firstHitReplaced = true
+      return { ...resolution, targetDamage }
+    },
+  }
+  probe.turnDeps = { ...probe.turnDeps, damage: wrapped }
+  probe.state.battlers[0]!.monToSwitchIntoId = PARTY_SIZE
+  if (run.action && run.action.action === 'SWITCH' && run.switchSlot !== null) {
+    probe.state.battlers[1]!.monToSwitchIntoId = run.switchSlot
+  }
+  stepTurn(probe, boost.choice.action, run.action)
+  return { probe, sawTargetCall }
+}
+
+/** (b) of check 2: P(hit1 + hit2 >= our HP) below the gate, with the two hits
+ * treated as independent. `a` ranges over the turn-1 distribution; the probe's
+ * `hpAfter` already carries turn 1's chip or healing at the forced `v`, so
+ * `remaining(a) = hpAfter + v - a` is the HP the turn-2 hit must remove.
+ * Equal `a` values are grouped with a count so the loop stays small. */
+function twoHitKoRiskBelowGate(
+  turnOne: number[],
+  v: number,
+  liveHp: number,
+  hpAfter: number,
+  moveDistributions: number[][],
+): boolean {
+  const counts = new Map<number, number>()
+  for (const a of turnOne) counts.set(a, (counts.get(a) ?? 0) + 1)
+  for (const distribution of moveDistributions) {
+    let chanceSum = 0
+    for (const [a, count] of counts) {
+      const remaining = hpAfter + v - a
+      const chance = a >= liveHp || remaining <= 0 ? 1 : koProbability(distribution, remaining)
+      chanceSum += chance * count
+    }
+    if (chanceSum / turnOne.length >= BATON_BOOST_KO_RISK) return false
+  }
+  return true
+}
+
+/** Runs one predicted turn-1 action on a clone and validates turn 2. Seeds
+ * 0..7 are tried for a damaging predicted move because a miss would skip the
+ * forced first hit; a status or switch action only needs seed 0. If none of
+ * the 8 reaches damage, the last probe is used. Unsafe when our battler 0
+ * fainted or was replaced. */
+function secondTurnRunSafe(
+  session: BattleSession,
+  boost: MoveChoiceInfo,
+  batonPass: MoveChoiceInfo,
+  liveHp: number,
+  run: SecondTurnRun,
+): boolean {
+  const v = highestProbableDamage(run.distribution)
+  const seeds = maxDamage(run.distribution) > 0 ? [0, 1, 2, 3, 4, 5, 6, 7] : [0]
+  let probe: BattleSession | null = null
+  for (const seed of seeds) {
+    const attempt = buildProbeTurn(session, boost, run, v, seed)
+    probe = attempt.probe
+    if (attempt.sawTargetCall) break
+  }
+  if (!probe) return false
+
+  const livePartyIndex = session.state.battlers[0]?.partyIndex ?? 0
+  const ours = probe.state.battlers[0]
+  if (!ours || ours.mon.hp <= 0 || ours.partyIndex !== livePartyIndex) return false
+  const hpAfter = ours.mon.hp
+
+  beginTurn(probe)
+  const deps = aiDamageDepsFor(probe.data, probe.state, probe.inverseBattle)
+  const samples: { action: ChosenAction; distribution: number[] }[] = []
+  for (const sample of predictAi(probe, SAMPLE_COUNT, PREDICTION_SEED)) {
+    const action = sample.action
+    if (!action || action.action !== 'USE_MOVE') continue
+    const moveId = action.chosenMove?.id ?? action.moveToBeUsed?.id ?? null
+    if (!moveId) continue
+    samples.push({ action, distribution: damageDistribution(aiDamageRolls(probe.state, moveId, 1, 0, deps)) })
+  }
+  // A turn-2 SWITCH sample is safe; with no USE_MOVE sample the run is safe.
+  if (samples.length === 0) return true
+
+  // (a) We act first with Baton Pass and no real-priority damager remains.
+  const ourAction = buildMoveAction(probe.state, probe.data, 0, batonPass.moveId, probe.turnDeps.damage)
+  const outspeedAll = samples.every((sample) => outspeeds(probe, ourAction, sample.action))
+  if (outspeedAll && priorityDamagers(probe).length === 0) return true
+
+  // (b) Two-hit cumulative KO probability below the gate.
+  return twoHitKoRiskBelowGate(run.distribution, v, liveHp, hpAfter, samples.map((s) => s.distribution))
+}
+
+/** Check 2: run once per DISTINCT move id among the turn-1 USE_MOVE samples;
+ * with none (all SWITCH or no action), run once with the first sample's
+ * action. Every run must be safe. */
+function secondTurnKoRiskSafe(
+  session: BattleSession,
+  boost: MoveChoiceInfo,
+  batonPass: MoveChoiceInfo,
+  liveHp: number,
+): boolean {
+  const deps = aiDamageDepsFor(session.data, session.state, session.inverseBattle)
+  const samples = predictAi(session, SAMPLE_COUNT, PREDICTION_SEED)
+  const runs: SecondTurnRun[] = []
+  const seen = new Set<string>()
+  for (const sample of samples) {
+    const action = sample.action
+    if (!action || action.action !== 'USE_MOVE') continue
+    const moveId = action.chosenMove?.id ?? action.moveToBeUsed?.id ?? null
+    if (!moveId || seen.has(moveId)) continue
+    seen.add(moveId)
+    runs.push({
+      action,
+      switchSlot: sample.switchSlot,
+      distribution: damageDistribution(aiDamageRolls(session.state, moveId, 1, 0, deps)),
+    })
+  }
+  if (runs.length === 0) {
+    const first = samples[0]
+    runs.push({
+      action: first?.action ?? null,
+      switchSlot: first?.switchSlot ?? null,
+      distribution: [0],
+    })
+  }
+  return runs.every((run) => secondTurnRunSafe(session, boost, batonPass, liveHp, run))
+}
+
+/** Own boosts for Baton Pass: while below the target stage and able to pass to
+ * a live bench slot, use a legal self-boost move -- but only when the boost can
+ * be expected to pass on. This is NOT the setupSweeper's threatened/safe gate:
+ * check 1 asks whether any predicted move (or any real-priority move in the
+ * opponent's slots) can KO us with at least BATON_BOOST_KO_RISK this turn, and
+ * check 2 clones the turn to confirm turn 2 is safe (we outspeed with no
+ * damaging priority move against us, or the two-hit cumulative KO chance is
+ * below BATON_BOOST_KO_RISK). Once at the target stage the pivot hand-off
+ * below carries the stages across with Baton Pass (turn.ts:1905-1930,
+ * handleBatonPass moveEffects.ts:10437+). */
 function chooseBatonPassSetup(
   session: BattleSession,
   view: PredictionView,
@@ -1403,9 +1658,13 @@ function chooseBatonPassSetup(
   // Both the boost and the pass need a living bench slot to pass into.
   if (pickBenchSlot(session, view.predictedMoveId) === null) return null
   const targetStage = params.targetStage ?? DEFAULT_TARGET_STAGE
-  if (view.threatened || opponentCanUndoBoosts(session) || currentBoostStage(session) >= targetStage) return null
+  if (opponentCanUndoBoosts(session) || currentBoostStage(session) >= targetStage) return null
   const boost = moves.find((info) => isUsableBoostMove(session, info))
-  return boost ? { choice: boost.choice, tag: 'setup' } : null
+  if (!boost) return null
+  const hp = session.state.battlers[0]?.mon.hp ?? 0
+  if (!firstTurnKoRiskSafe(session, hp)) return null
+  if (!secondTurnKoRiskSafe(session, boost, batonPass, hp)) return null
+  return { choice: boost.choice, tag: 'setup' }
 }
 
 /** The can-switch gate for a pivot move across teamLayer, choosePivot and chooseSupport:

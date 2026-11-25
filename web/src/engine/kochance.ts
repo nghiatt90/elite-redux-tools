@@ -19,22 +19,26 @@ export interface KoChanceEntry {
 }
 
 /**
- * Computes, for each hit count 1..MAX_HITS, the probability the defender's HP has
+ * Computes, for each hit count 1..`maxHits`, the probability the defender's HP has
  * reached 0 by then. `rolls` should be calculateMoveDamage()'s `rolls` (or
  * `critRolls`) array -- any 16 (or fewer) equiprobable damage values.
+ *
+ * `maxHits` defaults to MAX_HITS. A caller that only needs the first-hit
+ * probability passes 1: a repeated hit walk over a large (crit-weighted)
+ * multiset is otherwise needlessly expensive.
  *
  * Damage is clamped to `maxHp` at each step (a mon can't go "past" 0 HP in a way that
  * matters for KO counting), which both matches how KOs actually work and keeps the
  * distribution's key space bounded to `maxHp + 1` entries rather than growing
  * unboundedly across hits.
  */
-export function calcKoChances(rolls: number[], maxHp: number): KoChanceEntry[] {
+export function calcKoChances(rolls: number[], maxHp: number, maxHits = MAX_HITS): KoChanceEntry[] {
   if (rolls.length === 0 || maxHp <= 0) return []
 
   const entries: KoChanceEntry[] = []
   let distribution = new Map<number, number>([[0, 1]])
 
-  for (let hit = 1; hit <= MAX_HITS; hit++) {
+  for (let hit = 1; hit <= maxHits; hit++) {
     const next = new Map<number, number>()
     for (const [hpLost, probability] of distribution) {
       for (const roll of rolls) {
