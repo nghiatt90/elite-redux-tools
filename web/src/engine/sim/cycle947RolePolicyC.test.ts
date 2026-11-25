@@ -19,6 +19,7 @@ import {
   SIDE_STATUS_LIGHTSCREEN,
   SIDE_STATUS_REFLECT,
   STAT_SPATK,
+  STAT_SPDEF,
   STATUS_FIELD_ELECTRIC_TERRAIN,
   STATUS_FIELD_TRICK_ROOM,
   WEATHER_RAIN_TEMPORARY,
@@ -169,8 +170,10 @@ describe('cycle 947 - support: Baton Pass boosts', () => {
 
     expect(moveId(playTurn(s, 'support', {}, mem))).toBe('MOVE_CALM_MIND')
     expect(s.state.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE + 1)
+    expect(s.state.battlers[0]!.mon.statStages[STAT_SPDEF]).toBe(DEFAULT_STAT_STAGE + 1)
     expect(moveId(playTurn(s, 'support', {}, mem))).toBe('MOVE_CALM_MIND')
     expect(s.state.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE + 2)
+    expect(s.state.battlers[0]!.mon.statStages[STAT_SPDEF]).toBe(DEFAULT_STAT_STAGE + 2)
 
     // At the target stage the pivot hand-off runs; handleBatonPass carries
     // statStages to the incoming mon (turn.ts:1905-1930; moveEffects.ts:10437+).
@@ -178,6 +181,7 @@ describe('cycle 947 - support: Baton Pass boosts', () => {
     expect(moveId(pass)).toBe('MOVE_BATON_PASS')
     expect(pass.switchTo).toBe(1)
     expect(s.state.battlers[0]!.mon.statStages[STAT_SPATK]).toBe(DEFAULT_STAT_STAGE + 2)
+    expect(s.state.battlers[0]!.mon.statStages[STAT_SPDEF]).toBe(DEFAULT_STAT_STAGE + 2)
   })
 
   it('does not boost when threatened', () => {

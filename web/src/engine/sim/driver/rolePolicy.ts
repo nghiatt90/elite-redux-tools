@@ -435,11 +435,22 @@ function bestByLowestRoll(pool: MoveChoiceInfo[]): MoveChoiceInfo {
  * moves.json `effect` rather than a name list, so a repointed move id is
  * followed. Verified in data/v2.65beta/moves.json: MOVE_HAZE EFFECT_HAZE,
  * MOVE_ROAR EFFECT_ROAR, MOVE_DRAGON_TAIL / MOVE_WHIRLWIND / MOVE_CIRCLE_THROW
- * EFFECT_HIT_SWITCH_TARGET. */
+ * EFFECT_HIT_SWITCH_TARGET.
+ *
+ * Super Fang / Ruination run Haze after the hit unless the move had no effect:
+ * EFFECT_SUPER_FANG_HAZE (MOVE_NATURES_MADNESS, MOVE_RUINATION),
+ * BattleScript_EffectSuperFangHaze (battle_scripts_1.s:4105-4118) -> Cmd_normalisebuffs
+ * (battle_script_commands.c:9988-9994).
+ * Clear Smog resets every stage of a damaged target:
+ * EFFECT_CLEAR_SMOG (MOVE_CLEAR_SMOG, MOVE_ABSORB, MOVE_FORCE_PALM),
+ * BattleScript_EffectClearSmog (battle_scripts_1.s:1700-1702) -> MOVE_EFFECT_CLEAR_SMOG
+ * (battle_script_commands.c:2863-2870). */
 const PHASE_OUT_EFFECTS: ReadonlySet<string> = new Set([
   'EFFECT_HAZE',
   'EFFECT_ROAR',
   'EFFECT_HIT_SWITCH_TARGET',
+  'EFFECT_SUPER_FANG_HAZE',
+  'EFFECT_CLEAR_SMOG',
 ])
 
 /** Abilities with `bitfields.unaware` set in data/v2.65beta/abilityHooks.json --
@@ -457,10 +468,8 @@ const UNAWARE_ABILITIES: readonly string[] = [
 
 /** A self-boost move's effect -> the stats its handler raises, with the battle
  * script that sets `setstatchanger` (data/battle_scripts_1.s). Only rows whose
- * handler in moveEffects.ts was read; moves that raise an ambiguous stat are
- * deliberately omitted (EFFECT_SHARPEN picks the user's higher attacking stat,
- * getHighestAttackingStatId). The sweeper counts only STAT_ATK, STAT_SPATK and
- * STAT_SPEED; the other entries are here so the map stays a faithful record. */
+ * handler in moveEffects.ts was read. The sweeper counts only STAT_ATK, STAT_SPATK
+ * and STAT_SPEED; the other entries are here so the map stays a faithful record. */
 const SELF_BOOST_EFFECTS: Readonly<Record<string, readonly number[]>> = {
   // BattleScript_EffectAttackUp / AttackUp2 / SpecialAttackUp(2/3) / SpeedUp(2).
   EFFECT_ATTACK_UP: [STAT_ATK],
@@ -470,6 +479,14 @@ const SELF_BOOST_EFFECTS: Readonly<Record<string, readonly number[]>> = {
   EFFECT_SPECIAL_ATTACK_UP_3: [STAT_SPATK],
   EFFECT_SPEED_UP: [STAT_SPEED],
   EFFECT_SPEED_UP_2: [STAT_SPEED],
+  // BattleScript_EffectBellyDrum (battle_scripts_1.s:5592-5604; Cmd_maxattackhalvehp, battle_script_commands.c:11338-11354).
+  EFFECT_BELLY_DRUM: [STAT_ATK],
+  // BattleScript_EffectSharpen (battle_scripts_1.s:12008-12046; GetHighestAttackingStatId, battle_script_commands.c:8159-8170).
+  EFFECT_SHARPEN: [STAT_ATK, STAT_SPATK],
+  // BattleScript_EffectKarma (battle_scripts_1.s:4989 onwards): Speed -1, Sp. Atk +1, Sp. Def +1.
+  EFFECT_KARMA: [STAT_SPATK, STAT_SPDEF],
+  // BattleScript_EffectCurse (battle_scripts_1.s:4928-4960): Speed -1, Attack +1, Defense +1 (non-Ghost branch).
+  EFFECT_CURSE: [STAT_ATK, STAT_DEF],
   // BattleScript_EffectBulkUp (battle_scripts_1.s:6670-6693).
   EFFECT_BULK_UP: [STAT_ATK, STAT_DEF],
   // BattleScript_EffectCoil (:2019-2061).
@@ -518,11 +535,31 @@ function isCountingStat(stat: number): boolean {
   return stat === STAT_ATK || stat === STAT_SPATK || stat === STAT_SPEED
 }
 
+/** Ghost-branch Curse check: BattleScript_EffectCurse (battle_scripts_1.s:4928-4930)
+ * jumps to GhostCurse when the attacker is Ghost type or fog is effective on it. */
+function isGhostCurseUser(session: BattleSession): boolean {
+  const mon = session.state.battlers[0]?.mon
+  return (
+    (mon?.types.includes('GHOST') ?? false) ||
+    isBattlerWeatherAffected(
+      session.state,
+      0,
+      WEATHER_FOG_ANY,
+      aiDamageDepsFor(session.data, session.state, session.inverseBattle),
+    )
+  )
+}
+
 /** The counting stats a self-boost move raises, or null when it is not a
  * self-boost move. */
 export function boostStatsOf(session: BattleSession, moveId: string): readonly number[] | null {
   const move = session.data.dataContext.move(moveId)
-  if (!move || move.split !== 'STATUS' || move.target !== 'USER') return null
+  if (!move || move.split !== 'STATUS') return null
+  if (move.effect === 'EFFECT_CURSE') {
+    if (isGhostCurseUser(session)) return null
+  } else if (move.target !== 'USER') {
+    return null
+  }
   const stats = move.effect ? SELF_BOOST_EFFECTS[move.effect] : undefined
   return stats ? stats.filter(isCountingStat) : null
 }
@@ -1027,6 +1064,28 @@ function opponentCanUndoBoosts(session: BattleSession): boolean {
   return false
 }
 
+/** Whether a move is a usable self-boost for set-up or Baton Pass. */
+function isUsableBoostMove(session: BattleSession, info: MoveChoiceInfo): boolean {
+  if (!info.moveId) return false
+  const stats = boostStatsOf(session, info.moveId)
+  if (!stats || stats.length === 0) return false
+  const mon = session.state.battlers[0]?.mon
+  if (!mon) return false
+  // The handler fails when every stat it raises is already MAX_STAT_STAGE
+  // (BattleScript_EffectStatUp's jumpifstat check); don't pick such a move.
+  if (!stats.some((stat) => (mon.statStages[stat] ?? DEFAULT_STAT_STAGE) < MAX_STAT_STAGE)) {
+    return false
+  }
+  // Cmd_maxattackhalvehp (battle_script_commands.c:11338-11354; handleBellyDrum
+  // moveEffects.ts:1698-1700): Belly Drum fails when current HP <= maxHp / 2.
+  const move = session.data.dataContext.move(info.moveId)
+  if (move?.effect === 'EFFECT_BELLY_DRUM') {
+    const halfHp = Math.max(1, Math.floor(mon.maxHp / 2))
+    if (mon.hp <= halfHp) return false
+  }
+  return true
+}
+
 /** setupSweeper: while below the target stage, safe (no sample threatens) and
  * the opponent cannot undo the boost, use a legal self-boost move; else play as
  * attacker (decision 14). */
@@ -1038,17 +1097,9 @@ function chooseSetupSweeper(
   params: RoleParams,
 ): RoleDecision {
   const targetStage = params.targetStage ?? DEFAULT_TARGET_STAGE
-  const mon = session.state.battlers[0]?.mon
   if (!view.threatened && !opponentCanUndoBoosts(session) && currentBoostStage(session) < targetStage) {
     const moves = evaluateMoves(session, targetSlot)
-    const boost = moves.find((info) => {
-      if (!info.moveId) return false
-      const stats = boostStatsOf(session, info.moveId)
-      if (!stats || stats.length === 0) return false
-      // The handler fails when every stat it raises is already MAX_STAT_STAGE
-      // (BattleScript_EffectStatUp's jumpifstat check); don't pick such a move.
-      return stats.some((stat) => (mon?.statStages[stat] ?? DEFAULT_STAT_STAGE) < MAX_STAT_STAGE)
-    })
+    const boost = moves.find((info) => isUsableBoostMove(session, info))
     if (boost) return { choice: boost.choice, tag: 'setup' }
   }
   return chooseAttacker(session, view, targetSlot, hp)
@@ -1176,15 +1227,7 @@ function chooseStaller(
     }
     const curse = findEffect('EFFECT_CURSE')
     if (curse && (target.mon.status2 & STATUS2_CURSED) === 0) {
-      const ghostCurse =
-        mon?.types.includes('GHOST') ||
-        isBattlerWeatherAffected(
-          session.state,
-          0,
-          WEATHER_FOG_ANY,
-          aiDamageDepsFor(session.data, session.state, session.inverseBattle),
-        )
-      if (ghostCurse) return { choice: curse.choice, tag: 'residual' }
+      if (isGhostCurseUser(session)) return { choice: curse.choice, tag: 'residual' }
     }
   }
 
@@ -1293,16 +1336,8 @@ function chooseBatonPassSetup(
   // Both the boost and the pass need a living bench slot to pass into.
   if (pickBenchSlot(session, view.predictedMoveId) === null) return null
   const targetStage = params.targetStage ?? DEFAULT_TARGET_STAGE
-  const mon = session.state.battlers[0]?.mon
   if (view.threatened || opponentCanUndoBoosts(session) || currentBoostStage(session) >= targetStage) return null
-  const boost = moves.find((info) => {
-    if (!info.moveId) return false
-    const stats = boostStatsOf(session, info.moveId)
-    if (!stats || stats.length === 0) return false
-    // Do not pick a boost whose every raised stat is already MAX_STAT_STAGE
-    // (BattleScript_EffectStatUp's jumpifstat check).
-    return stats.some((stat) => (mon?.statStages[stat] ?? DEFAULT_STAT_STAGE) < MAX_STAT_STAGE)
-  })
+  const boost = moves.find((info) => isUsableBoostMove(session, info))
   return boost ? { choice: boost.choice, tag: 'setup' } : null
 }
 
