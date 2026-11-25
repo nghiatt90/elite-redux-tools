@@ -30,8 +30,8 @@
 //   gaps below, as in the C: that second pass (:5517+) only happens for a mon
 //   that is still alive after the hazards, so a hazard faint emits neither gap
 //   and leaves the battler at 0 HP for applyEndOfTurnReplacements to replace
-//   again. Hot Coals / Caltrops, Mirror Armor on Sticky Web and the Toxic
-//   Spikes reaction flags are gapped inside hazards.ts, only when they apply.
+//   again. Mirror Armor on Sticky Web and the Toxic Spikes reaction flags are
+//   gapped inside hazards.ts, only when they apply.
 //
 //   Switch-in abilities (HandleSwitchInAbility's own scan over every ability
 //   slot, battle_util.c, reached from Cmd_switchineffects at

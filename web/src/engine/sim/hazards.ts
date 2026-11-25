@@ -16,10 +16,9 @@
 // why Heavy-Duty Boots, Tectonize and Shield Dust are tested on the switching
 // mon itself and why grounding is evaluated with no Mold Breaker attacker.
 //
-// NOT ported, gapped only when the real condition holds: Hot Coals and Caltrops
-// (:8798-8830, no writer anywhere in this sim) and SetOnMoveEffectReactionFlags
-// after Toxic Spikes poisons. Sticky Web's setter (and so Mirror Armor's reflection)
-// is state.stickyWebUser.
+// NOT ported, gapped only when the real condition holds: SetOnMoveEffectReactionFlags
+// after Toxic Spikes poisons. Hot Coals and Caltrops (:8800-8836) are ported below.
+// Sticky Web's setter (and so Mirror Armor's reflection) is state.stickyWebUser.
 // SIDE_STATUS_STEALTH_ROCK_DAMAGED / STICKY_WEB_DAMAGED (:8750, :8795) are not
 // written: nothing in the pinned source reads them and the second pass would
 // clear them again.
@@ -36,6 +35,8 @@ import {
   SIDE_STATUS_STEALTH_ROCK,
   SIDE_STATUS_STICKY_WEB,
   SIDE_STATUS_TOXIC_SPIKES,
+  STATUS1_BLEED,
+  STATUS1_BURN,
   STATUS1_POISON,
   STATUS1_TOXIC_POISON,
   STATUS2_WRAPPED,
@@ -58,7 +59,15 @@ import {
   STAT_BUFF_ALLOW_PTR,
   STAT_BUFF_NOT_PROTECT_AFFECTED,
 } from './statBuffs'
-import { canBePoisoned, MOVE_EFFECT_POISON, SET_STATE_ON_EFFECT_MAP } from './statusEffects'
+import {
+  canBeBurned,
+  canBePoisoned,
+  canBleed,
+  MOVE_EFFECT_BURN,
+  MOVE_EFFECT_POISON,
+  SET_STATE_ON_EFFECT_MAP,
+  setOnMoveEffectReactionFlags,
+} from './statusEffects'
 
 /** The type tables GetStealthHazardDamage's GetTypeModifier calls need. Optional
  * on the turn loop's deps: a Stealth Rock switch-in without them is gapped, not
@@ -221,10 +230,39 @@ export function applySwitchInHazards(state: BattleState, battlerId: number, deps
     }
   }
 
-  // HAZARD_MODE_FIRE_TRAP (Hot Coals) and HAZARD_MODE_CALTROPS, :8800-8830.
-  for (const [flag, name] of [[side.timers.hotCoals, 'Hot Coals'], [side.timers.caltrops, 'Caltrops']] as const) {
-    if (flag && isAlive(state, battlerId) && isBattlerAffectedByHazards(state, battlerId, false, false, deps) && grounded()) {
-      unmodelled.push(`battler ${battlerId}: ${name} entry hazard (battle_script_commands.c:8800-8830) is not applied`)
+  // HAZARD_MODE_FIRE_TRAP (Hot Coals), :8800-8822.
+  // No Magic Guard check: only Spikes and Stealth Rock test IsMagicGuardProtected.
+  if (isAlive(state, battlerId) && side.timers.hotCoals && isBattlerAffectedByHazards(state, battlerId, false, false, deps) && grounded()) {
+    const battler = state.battlers[battlerId]!
+    const statusDeps = { dataContext: deps.dataContext, grounding }
+    // The timer clears BEFORE the status check (:8808), so the hazard fades even
+    // when the status cannot land.
+    side.timers.hotCoals = false
+    // CanBeBurned, battle_util.c:5061-5070. Pass a null attacker: the C's own
+    // IsMyceliumMightActive(gBattlerAttacker) reads battle_main.c:4249 (the
+    // HITMARKER_MYCELIUM_MIGHT hit marker), which is not set while a mon merely
+    // switches in. Passing the switching mon's id would let the sim's
+    // ability-only isMyceliumMightActive bypass its own Fire-type immunity, which
+    // the C does not do; with attacker == self, mold breaker never applies either.
+    if (canBeBurned(state, battlerId, null, statusDeps)) {
+      // gBattlerAttacker == gActiveBattler here (:5497), so the holder is the
+      // opposite battler (:8811-8816). The partner call is doubles only, matching
+      // how the Toxic Spikes block above handles `opposite`.
+      setOnMoveEffectReactionFlags(state, opposite, battlerId, MOVE_EFFECT_BURN, statusDeps)
+      battler.mon.status1 |= STATUS1_BURN
+    }
+  }
+
+  // HAZARD_MODE_CALTROPS, :8823-8836.
+  // No Magic Guard check and no reaction flags: the C calls neither here.
+  if (isAlive(state, battlerId) && side.timers.caltrops && isBattlerAffectedByHazards(state, battlerId, false, false, deps) && grounded()) {
+    const battler = state.battlers[battlerId]!
+    const statusDeps = { dataContext: deps.dataContext, grounding }
+    // The timer clears BEFORE the status check (:8829).
+    side.timers.caltrops = false
+    // CanBleed, battle_util.c:5106-5114. Same null attacker as Hot Coals above.
+    if (canBleed(state, battlerId, null, statusDeps)) {
+      battler.mon.status1 |= STATUS1_BLEED
     }
   }
 }

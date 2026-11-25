@@ -9733,7 +9733,8 @@ export function handleBestow(ctx: MoveEffectContext): ActionOutcome {
  * Sets `gSideTimers[GetBattlerSide(gActiveBattler)].caltrops = TRUE` on the target side
  * (note: unlike Spikes/Stealth Rock/Toxic Spikes, VARIOUS_SET_CALTROPS does not set any
  * bit in `gSideStatuses`). Fails via BattleScript_ButItFailedAtkStringPpReduce if
- * `caltrops` is already set on that side. Switch-in consumption is handled in hazards.ts:220-224.
+ * `caltrops` is already set on that side. Switch-in consumption is handled in
+ * applySwitchInHazards (hazards.ts).
  */
 export function handleCaltrops(ctx: MoveEffectContext): ActionOutcome {
   const { state, battlerId, action, unmodelled, deductPp } = ctx

@@ -532,14 +532,15 @@ describe('order, fainting and the second pass', () => {
     expect(state.battlers[0]!.mon.hp).toBe(68) // 90 - 90/4 (22)
   })
 
-  it('gaps Hot Coals / Caltrops only when set', () => {
+  it('a set Hot Coals timer burns the entering mon, fades, and leaves no gap note', () => {
+    // HAZARD_MODE_FIRE_TRAP, battle_script_commands.c:8800-8822: the timer clears
+    // before CanBeBurned, and a burn lands on a grounded, hazard-affected entrant.
     const state = battle([partyMon({ hp: 5 }), partyMon()])
     state.sides[0].timers.hotCoals = true
     const out = executeTurn(state, [null, moveAction(0)], deps(fixedDamage(999), { replacement: chooser(1) }))
-    expect(out.replacementUnmodelled.some((g) => g.includes('Hot Coals'))).toBe(true)
-    const clean = battle([partyMon({ hp: 5 }), partyMon()])
-    const out2 = executeTurn(clean, [null, moveAction(0)], deps(fixedDamage(999), { replacement: chooser(1) }))
-    expect(out2.replacementUnmodelled.some((g) => /Hot Coals|Caltrops/.test(g))).toBe(false)
+    expect(state.battlers[0]!.mon.status1).toBe(STATUS1_BURN)
+    expect(state.sides[0].timers.hotCoals).toBe(false)
+    expect(out.replacementUnmodelled.some((g) => /Hot Coals|Caltrops/.test(g))).toBe(false)
   })
 })
 

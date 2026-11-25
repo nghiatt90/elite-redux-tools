@@ -920,11 +920,11 @@ function statusLandsOnUs(
  * touched.
  *
  * Hazards: `applySwitchInHazards` is the sim's own port of
- * VARIOUS_DO_HAZARD_DAMAGE (battle_script_commands.c:8711-8800) and already
- * knows Spikes, Stealth Rock and Toxic Spikes, so the cost is what the probe's
- * HP lost, not a re-derivation. `probe.turnDeps` supplies the `HazardDeps`
- * surface (grounding, dataContext, hazardTypes). A move range of 0 or an
- * immunity does not waive this: entering still costs HP.
+ * VARIOUS_DO_HAZARD_DAMAGE (battle_script_commands.c:8711-8836) and already
+ * knows Spikes, Stealth Rock, Toxic Spikes, Hot Coals and Caltrops, so the cost
+ * is what the probe's HP lost, not a re-derivation. `probe.turnDeps` supplies
+ * the `HazardDeps` surface (grounding, dataContext, hazardTypes). A move range
+ * of 0 or an immunity does not waive this: entering still costs HP.
  *
  * Toxic Terrain: the ENDTURN_TOXIC_TERRAIN chip (battle_util.c:2124-2146,
  * maxHP/16 via `hpfractiontodamage BS_STACK_1, 16`,
@@ -936,10 +936,10 @@ function statusLandsOnUs(
  *
  * A status: not a damage cost but a disqualification -- if the hazard port gave
  * a clean (`status1 === 0`) entrant a status, the loop cannot call the switch
- * free. That is the sim's own Toxic Spikes block
- * (battle_script_commands.c:8760-8787, absorb and `CanBePoisoned` gates
- * included), not a re-derivation; a mon that already had a status stays
- * eligible. */
+ * free. That is the sim's own hazard port (Toxic Spikes at
+ * battle_script_commands.c:8760-8787, plus Hot Coals / Caltrops at :8800-8836,
+ * absorb and `CanBePoisoned`/`CanBeBurned`/`CanBleed` gates included), not a
+ * re-derivation; a mon that already had a status stays eligible. */
 function ppLoopSwitchInCost(session: BattleSession, slot: number): number | null {
   const reserve = session.state.sides[0].party[slot]
   if (!reserve || reserve.speciesId === null) return null
