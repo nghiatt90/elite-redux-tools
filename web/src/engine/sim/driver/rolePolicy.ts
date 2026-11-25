@@ -13,7 +13,7 @@
 // are marked as such.
 
 import { createBattlerState } from '../create'
-import type { AiDamageRolls } from '../ai/aiCalcDamage'
+import type { AiDamageDeps, AiDamageRolls } from '../ai/aiCalcDamage'
 import { aiDamageRolls } from '../ai/aiCalcDamage'
 import { calcKoChances } from '../../kochance'
 import {
@@ -1414,6 +1414,34 @@ function damageDistribution(range: AiDamageRolls | null): number[] {
   return multiset
 }
 
+/** Whether an opponent's `moveId` cannot connect with us at all, because WE use
+ * a status move on BOTH turns the own-boost gate predicts (the boost this turn,
+ * Baton Pass the next). Two effects fail outright against a status user:
+ * - EFFECT_SUCKER_PUNCH: VARIOUS_SUCKER_PUNCH_CHECK fails the move when it acts
+ *   after the target, or when the target's chosen move has split SPLIT_STATUS
+ *   (src/battle_script_commands.c:7213-7219; BattleScript_EffectSuckerPunch,
+ *   data/battle_scripts_1.s:2336-2340).
+ * - EFFECT_FAKE_OUT: Cmd_jumpifnotfirstturn fails unless the attacker is still
+ *   on its first turn, `gVolatileStructs[].isFirstTurn` (2 on switch-in,
+ *   decremented by TurnValuesCleanUp), or the hit is a queued extra attack
+ *   (src/battle_script_commands.c:9439-9446; BattleScript_EffectFakeOut,
+ *   data/battle_scripts_1.s:5932-5934).
+ * Read on the session passed in, so a probe that has played its first turn and
+ * a live first turn disagree exactly as the C does. */
+function cannotHitStatusUser(session: BattleSession, attackerId: number, moveId: string): boolean {
+  const effect = session.data.dataContext.move(moveId)?.effect
+  if (effect === 'EFFECT_SUCKER_PUNCH') return true
+  if (effect === 'EFFECT_FAKE_OUT') return !session.state.battlers[attackerId]?.volatiles.isFirstTurn
+  return false
+}
+
+/** The distribution ONE predicted opponent move deals to us this turn, or `[0]`
+ * when it cannot connect with a status user (`cannotHitStatusUser`). */
+function incomingDistribution(session: BattleSession, moveId: string, deps: AiDamageDeps): number[] {
+  if (cannotHitStatusUser(session, 1, moveId)) return [0]
+  return damageDistribution(aiDamageRolls(session.state, moveId, 1, 0, deps))
+}
+
 function maxDamage(distribution: number[]): number {
   let max = 0
   for (const value of distribution) if (value > max) max = value
@@ -1442,6 +1470,8 @@ function priorityDamagers(session: BattleSession): number[][] {
     const action = buildMoveAction(session.state, session.data, 1, moveId, session.turnDeps.damage)
     if (!action.chosenMove) continue
     if (getMovePriority(session.state, 1, action.chosenMove, 0) <= 0) continue
+    // A move that cannot hit a status user is not a damager (cannotHitStatusUser).
+    if (cannotHitStatusUser(session, 1, moveId)) continue
     const distribution = damageDistribution(aiDamageRolls(session.state, moveId, 1, 0, deps))
     if (maxDamage(distribution) <= 0) continue
     result.push(distribution)
@@ -1461,7 +1491,7 @@ function firstTurnKoRiskSafe(session: BattleSession, hp: number): boolean {
     if (!action || action.action !== 'USE_MOVE') continue
     const moveId = action.chosenMove?.id ?? action.moveToBeUsed?.id ?? null
     if (!moveId) continue
-    const distribution = damageDistribution(aiDamageRolls(session.state, moveId, 1, 0, deps))
+    const distribution = incomingDistribution(session, moveId, deps)
     if (koProbability(distribution, hp) >= BATON_BOOST_KO_RISK) return false
   }
   for (const distribution of priorityDamagers(session)) {
@@ -1587,7 +1617,7 @@ function secondTurnRunSafe(
     if (!action || action.action !== 'USE_MOVE') continue
     const moveId = action.chosenMove?.id ?? action.moveToBeUsed?.id ?? null
     if (!moveId) continue
-    samples.push({ action, distribution: damageDistribution(aiDamageRolls(probe.state, moveId, 1, 0, deps)) })
+    samples.push({ action, distribution: incomingDistribution(probe, moveId, deps) })
   }
   // A turn-2 SWITCH sample is safe; with no USE_MOVE sample the run is safe.
   if (samples.length === 0) return true
@@ -1623,7 +1653,7 @@ function secondTurnKoRiskSafe(
     runs.push({
       action,
       switchSlot: sample.switchSlot,
-      distribution: damageDistribution(aiDamageRolls(session.state, moveId, 1, 0, deps)),
+      distribution: incomingDistribution(session, moveId, deps),
     })
   }
   if (runs.length === 0) {
