@@ -138,32 +138,36 @@ function theirActiveHp(session: BattleSession): number {
   return session.state.battlers[1]?.mon.hp ?? 0
 }
 
-/** The reserve's best damaging move onto THEIR active mon: the substituted
- * attacker route (`stateWithReserve` at battler 0, then `aiDamageRolls` 0 -> 1),
- * the same call shape `rangeAgainstTheirReserve` uses for their reserve at
- * rolePolicy.ts:222-233. "Best" is the largest mean roll (the replacement rule
- * names that explicitly); this file's single notion of a bench mon's best move
- * so the counter rule and the replacement score cannot disagree. Not
- * accuracy-weighted -- the design spec ranks by raw mean. */
-function bestReserveMove(
-  session: BattleSession,
-  slot: number,
-): { moveId: string; lowest: number; mean: number } | null {
+/** The reserve's damage ranges onto THEIR active mon: the substituted attacker
+ * route (`stateWithReserve` at battler 0, then `aiDamageRolls` 0 -> 1), the same
+ * call shape `rangeAgainstTheirReserve` uses for their reserve at
+ * rolePolicy.ts:222-233. Each value is the best over the reserve's usable moves
+ * -- the largest WORST roll for `lowest` and the largest MEAN for `mean`, which
+ * may come from two different moves. The counter rule asks a floor question of
+ * one and a mean question of the other, so taking both from a single "best"
+ * move would hide a mon that threatens through a different move; the two stay
+ * separate so the replacement score keeps its mean ranking (the design spec
+ * ranks by raw mean). Not accuracy-weighted. */
+function bestReserveMove(session: BattleSession, slot: number): { lowest: number; mean: number } | null {
   const reserve = session.state.sides[0].party[slot]
   if (!reserve || reserve.speciesId === null) return null
   const state = stateWithReserve(session.state, 0, reserve, slot)
   const deps = aiDamageDepsFor(session.data, state, session.inverseBattle)
-  let best: { moveId: string; lowest: number; mean: number } | null = null
+  let lowest: number | null = null
+  let mean: number | null = null
   for (let i = 0; i < reserve.moves.length; i++) {
     const moveId = reserve.moves[i]
     const pp = reserve.pp[i]
     if (!moveId || !(pp > 0)) continue
     const range = aiDamageRolls(state, moveId, 0, 1, deps)
     if (!range || range.isImmune) continue
-    const mean = meanRoll(range)
-    if (best === null || mean > best.mean) best = { moveId, lowest: lowestRoll(range), mean }
+    const moveLow = lowestRoll(range)
+    const moveMean = meanRoll(range)
+    if (lowest === null || moveLow > lowest) lowest = moveLow
+    if (mean === null || moveMean > mean) mean = moveMean
   }
-  return best
+  if (lowest === null || mean === null) return null
+  return { lowest, mean }
 }
 
 /** Whether the bench candidate would move before their active mon. `outspeeds`
@@ -214,11 +218,12 @@ function predictedMoveIds(predictions: AiPrediction[]): string[] {
 interface BenchScore {
   slot: number
   incomingFraction: number
-  /** The best (largest-mean) move's worst roll; the counter rule's "KO in two"
+  /** The largest worst roll over the candidate's usable moves (possibly a
+   * different move from the mean below); the counter rule's "KO in two"
    * input. */
   lowestRoll: number
-  /** The best (largest-mean) move's mean roll; the counter rule's "heavy
-   * damage" input. */
+  /** The largest mean roll over the candidate's usable moves; the counter
+   * rule's "heavy damage" input and the replacement score's offense term. */
   meanRoll: number
   outspeeds: boolean
   /** True when the predicted move removes at most `switchInSafety`% of the
@@ -557,12 +562,16 @@ function ruleSacrifice(
 }
 
 /** counter: a bench teammate takes the predicted move for at most
- * `switchInSafety`% of its current HP AND threatens their active mon (its best
- * move's worst roll KOs in two or fewer hits, or it outspeeds with a mean roll
- * of at least half their HP), while our active mon does neither: no KO in two
- * AND no outspeed-with-heavy-damage, with `view.threatened` keeping a slower
- * active mon eligible for the switch. Pick the best such teammate by the
- * replacement score and switch to it. No predicted move: no fire. */
+ * `switchInSafety`% of its current HP AND threatens their active mon -- any of
+ * its moves has a worst roll that KOs in two or fewer hits, or any of its moves
+ * outspeeds with a mean roll of at least half their HP -- while our active mon
+ * does neither: no move KOes in two AND no move outspeeds with heavy damage,
+ * with `view.threatened` keeping a slower active mon eligible for the switch.
+ * Pick the best such teammate by the replacement score and switch to it. No
+ * predicted move: no fire.
+ *
+ * MODEL CHOICE: "heavy damage = a mean roll of at least half their HP" is a
+ * threshold the player chose, not a game fact. */
 function ruleCounter(
   session: BattleSession,
   view: PredictionView,
@@ -575,24 +584,32 @@ function ruleCounter(
   const damaging = evaluateMoves(session, null).filter(
     (info) => info.range !== null && !info.range.isImmune,
   )
-  // The active mon's best move for a KO-in-two question is the one with the
-  // highest WORST roll: "KO in two" is a floor question (as everywhere else in
-  // decision 14), unlike the bench side, where the brief names the mean.
+  // Each side of the matchup decides over its WHOLE move list, so a mon that
+  // threatens through any one move counts. "KO in two" is a floor question (as
+  // everywhere else in decision 14): any move whose worst roll doubled reaches
+  // their HP.
+  const activeKoInTwo = damaging.some((info) => 2 * lowestRoll(info.range!) >= theirHp)
+  // The active's own gate, as decision 14 puts it: no KO in two, and when it
+  // does not outspeed it must be the one at risk. The move with the highest
+  // WORST roll is the one that answers that.
   let activeBest: MoveChoiceInfo | null = null
   for (const info of damaging) {
     if (activeBest === null || lowestRoll(info.range!) > lowestRoll(activeBest.range!)) activeBest = info
   }
-  const activeKoInTwo = activeBest !== null && 2 * lowestRoll(activeBest.range!) >= theirHp
-  // The active's own gate, as decision 14 puts it: no KO in two, and when it
-  // does not outspeed it must be the one at risk.
   const activeOutspeeds =
     activeBest !== null ? outspeeds(session, activeBest.choice.action, view.predictedAction) : false
   // Decision 14's other side of "does neither": outspeeding with heavy damage
   // (mean roll of at least half their HP) also threatens them, so a fast heavy
   // hitter must not be switched out just because its worst roll falls short of
-  // the two-hit KO. The bench side uses the same test below.
-  const activeFastHeavy =
-    activeOutspeeds && activeBest !== null && 2 * meanRoll(activeBest.range!) >= theirHp
+  // the two-hit KO. Priority rides on the action, so Extreme Speed counts as
+  // outspeeding even from a slower mon. The damage test runs first so
+  // `outspeeds` only probes when it can matter. The bench side uses the same
+  // test below.
+  const activeFastHeavy = damaging.some(
+    (info) =>
+      2 * meanRoll(info.range!) >= theirHp &&
+      outspeeds(session, info.choice.action, view.predictedAction),
+  )
   const activeDoesNeither = !activeKoInTwo && !activeFastHeavy && (activeOutspeeds || view.threatened)
   if (!activeDoesNeither) return null
 
