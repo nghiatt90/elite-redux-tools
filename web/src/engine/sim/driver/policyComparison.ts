@@ -219,6 +219,24 @@ export interface ActiveView {
   statStages: number[]
 }
 
+/** Observer-only Baton Pass counters (cycle s20h). They are read from the
+ * policy's trace, the choice and the turn outcome, so they add no RNG draws and
+ * mutate nothing. */
+export interface BatonCounters {
+  /** Turns where the role policy's own trace slice holds a `support`/`setup`
+   * decision: the Baton Pass own-boost step chose the move, even if it was then
+   * cancelled. Expectimax writes no trace, so it is always 0 there. */
+  batonBoostFired: number
+  /** Turns where the chosen move's effect is `EFFECT_BATON_PASS`, the active mon
+   * is boosted at decision time and has itself boosted since its switch-in.
+   * Team-layer and role-layer pivots both count. */
+  batonBoostPasses: number
+  /** Of those passes, the ones that executed and whose receiver, at our next
+   * decision, is alive in a different party slot and still above neutral in at
+   * least one stat the passer was above neutral in. */
+  batonBoostReceived: number
+}
+
 export interface ObservedTurn {
   turn: number
   player: ActiveView
@@ -243,6 +261,8 @@ export interface PolicyObserver {
   wrap: (policy: PolicyFn) => PolicyFn
   onTurn: (turn: number, choice: PlayerChoice | null, step: StepResult) => void
   counters: BoostingCounters
+  /** Observer-only Baton Pass own-boost counters (cycle s20h). */
+  batonCounters: BatonCounters
   aiSwitchSummary: { total: number; byThing: Record<string, number> }
   /** Per-turn captures, populated only when `collectLog` is on. */
   turns: ObservedTurn[]
@@ -252,6 +272,8 @@ interface PendingCapture {
   turn: number
   data: SimDataBundle
   activeAlive: boolean
+  /** Party slot of the active mon at decision time, or null when none is out. */
+  activePartyIndex: number | null
   player: ActiveView
   opponent: ActiveView
   playerPartySpecies: (string | null)[]
@@ -267,6 +289,13 @@ interface PendingCapture {
   hasBoostingChoice: boolean
   boostingIds: Set<string>
   trace: PolicyTraceEntry[]
+}
+
+/** A Baton Pass that executed, waiting on the next decision to see who received
+ * it. Cleared at that next capture whether or not it counted. */
+interface PendingBatonPass {
+  passerSlot: number
+  raisedStats: number[]
 }
 
 const COUNTING_STAGES = [STAT_ATK, STAT_DEF, STAT_SPEED, STAT_SPATK, STAT_SPDEF]
@@ -307,6 +336,7 @@ function captureTurn(session: BattleSession, turn: number): PendingCapture {
     turn,
     data: session.data,
     activeAlive: !!active && active.mon.hp > 0,
+    activePartyIndex: active ? active.partyIndex : null,
     player: activeView(active),
     opponent: activeView(opponent),
     playerPartySpecies: state.sides[0].party.map((mon) => mon?.speciesId ?? null),
@@ -330,14 +360,39 @@ export function createPolicyObserver(options: { collectLog?: boolean } = {}): Po
     attackedWhileBoosted: 0,
     positiveStage: 0,
   }
+  const batonCounters: BatonCounters = {
+    batonBoostFired: 0,
+    batonBoostPasses: 0,
+    batonBoostReceived: 0,
+  }
   const aiSwitchSummary = { total: 0, byThing: {} as Record<string, number> }
   const turns: ObservedTurn[] = []
   let pending: PendingCapture | null = null
   let ownBoostSinceSwitchIn = false
+  let pendingBatonPass: PendingBatonPass | null = null
+
+  const raisedStatsOf = (stages: number[]): number[] =>
+    COUNTING_STAGES.filter((stat) => (stages[stat] ?? DEFAULT_STAT_STAGE) > DEFAULT_STAT_STAGE)
+
+  /** Resolve a pending pass against the next decision's capture, then clear it
+   * either way. */
+  const resolvePendingBatonPass = (captured: PendingCapture): void => {
+    const pass = pendingBatonPass
+    if (!pass) return
+    pendingBatonPass = null
+    if (!captured.activeAlive) return
+    if (captured.activePartyIndex === null) return
+    if (captured.activePartyIndex === pass.passerSlot) return
+    const carried = pass.raisedStats.some(
+      (stat) => (captured.player.statStages[stat] ?? DEFAULT_STAT_STAGE) > DEFAULT_STAT_STAGE,
+    )
+    if (carried) batonCounters.batonBoostReceived++
+  }
 
   const wrap = (policy: PolicyFn): PolicyFn => (session, turn, trace) => {
     const before = trace.length
     pending = captureTurn(session, turn)
+    resolvePendingBatonPass(pending)
     const choice = policy(session, turn, trace)
     pending.trace = trace.slice(before)
     return choice
@@ -354,6 +409,19 @@ export function createPolicyObserver(options: { collectLog?: boolean } = {}): Po
         : null
 
     if (captured.switchedIn) ownBoostSinceSwitchIn = false
+
+    if (
+      captured.trace.some((entry) => entry.tags[0] === 'support' && entry.tags[1] === 'setup')
+    ) {
+      batonCounters.batonBoostFired++
+    }
+    const chosenEffect = chosenMoveId
+      ? captured.data.dataContext.move(chosenMoveId)?.effect
+      : undefined
+    const batonPassChosen = chosenEffect === 'EFFECT_BATON_PASS'
+    if (batonPassChosen && captured.boosted && ownBoostSinceSwitchIn) {
+      batonCounters.batonBoostPasses++
+    }
 
     if (captured.activeAlive && captured.hasBoostingChoice) counters.available++
     if (chosenMoveId && captured.boostingIds.has(chosenMoveId)) counters.used++
@@ -382,6 +450,21 @@ export function createPolicyObserver(options: { collectLog?: boolean } = {}): Po
       ownBoostSinceSwitchIn = true
     }
 
+    // Remember an executed pass so the next decision can see who received it.
+    if (
+      batonPassChosen &&
+      captured.activePartyIndex !== null &&
+      playerAction &&
+      playerAction.cancelledBy === null &&
+      !playerAction.skippedBecauseFainted &&
+      !playerAction.battleOver
+    ) {
+      pendingBatonPass = {
+        passerSlot: captured.activePartyIndex,
+        raisedStats: raisedStatsOf(captured.player.statStages),
+      }
+    }
+
     if (step.chosenActions[1]?.action === 'SWITCH') {
       aiSwitchSummary.total++
       const thing =
@@ -408,7 +491,7 @@ export function createPolicyObserver(options: { collectLog?: boolean } = {}): Po
     }
   }
 
-  return { wrap, onTurn, counters, aiSwitchSummary, turns }
+  return { wrap, onTurn, counters, batonCounters, aiSwitchSummary, turns }
 }
 
 // ---------------------------------------------------------------------------
@@ -438,6 +521,11 @@ export interface ComparisonGameRecord {
   aiSwitchByThing: Record<string, number>
   playerPartyHp: number[]
   opponentPartyHp: number[]
+  /** Optional because older record literals and the committed per-fight JSON
+   * files predate the Baton Pass counters (cycle s20h). */
+  batonBoostFired?: number
+  batonBoostPasses?: number
+  batonBoostReceived?: number
   log?: string
 }
 
@@ -515,6 +603,9 @@ export function playComparisonGame(
     aiSwitchByThing: { ...observer.aiSwitchSummary.byThing },
     playerPartyHp: partyHp(result.session, 0),
     opponentPartyHp: partyHp(result.session, 1),
+    batonBoostFired: observer.batonCounters.batonBoostFired,
+    batonBoostPasses: observer.batonCounters.batonBoostPasses,
+    batonBoostReceived: observer.batonCounters.batonBoostReceived,
   }
   if (observer.turns.length > 0) record.log = formatBattleLog(observer.turns, result)
   return record
@@ -681,6 +772,11 @@ export interface PolicySummary {
   positiveStage?: number
   aiSwitches: number
   aiSwitchByThing: Record<string, number>
+  /** Optional because the committed per-fight JSON files of earlier runs predate
+   * the Baton Pass counters (cycle s20h). */
+  batonBoostFired?: number
+  batonBoostPasses?: number
+  batonBoostReceived?: number
 }
 
 export function summarizePolicy(
@@ -715,6 +811,9 @@ export function summarizePolicy(
     positiveStage: total((record) => record.positiveStage),
     aiSwitches: total((record) => record.aiSwitches),
     aiSwitchByThing,
+    batonBoostFired: total((record) => record.batonBoostFired ?? 0),
+    batonBoostPasses: total((record) => record.batonBoostPasses ?? 0),
+    batonBoostReceived: total((record) => record.batonBoostReceived ?? 0),
   }
 }
 
@@ -796,6 +895,15 @@ export function renderGateReport(input: GateReportInput): string {
   lines.push(
     '- `any positive stage`: turns where our active mon at decision time has any of stat stages 1..5 above neutral, whatever raised them (passive raises and Baton-Passed stages included).',
   )
+  lines.push(
+    '- `baton boost step fired`: turns where the role policy\'s own trace slice holds a `support`/`setup` decision -- the Baton Pass own-boost step chose the move, even if the move was then cancelled. It is read from the role policy\'s trace, so the expectimax row is always `-`.',
+  )
+  lines.push(
+    '- `boost passes`: turns where the chosen move\'s effect is `EFFECT_BATON_PASS`, the active mon is boosted at decision time and has itself boosted since its current switch-in. Team-layer and role-layer pivots both count.',
+  )
+  lines.push(
+    '- `boost received`: of those passes, the ones that executed and where, at our next decision, a different party slot is active, alive, and still above neutral in at least one stat the passer was above neutral in. A receiver that faints before the next decision, or a battle that ends first, is not counted.',
+  )
   if (hasLegacySummary) {
     lines.push(
       '- Measurements without an `Any positive stage` value predate the own-boost definition: their `Boosted` and `Attacked boosted` count any positive stage in stats 1..5, passive and Baton-Passed raises included.',
@@ -864,6 +972,30 @@ export function renderGateReport(input: GateReportInput): string {
           summary.policy,
           String(summary.aiSwitches),
           switchBreakdown(summary),
+        ]),
+      )
+    }
+  }
+  lines.push('')
+
+  lines.push('## Baton Pass own boosts', '')
+  lines.push(
+    tableRow(['Fight', 'Policy', 'Own-boost step fired', 'Boost passes', 'Boost received']),
+  )
+  lines.push(tableRow(Array(5).fill('---')))
+  for (const fight of input.fights) {
+    for (const summary of [fight.role, fight.expectimax]) {
+      lines.push(
+        tableRow([
+          fight.key,
+          summary.policy,
+          summary.policy === 'expectimax'
+            ? '-'
+            : summary.batonBoostFired === undefined
+              ? '-'
+              : String(summary.batonBoostFired),
+          summary.batonBoostPasses === undefined ? '-' : String(summary.batonBoostPasses),
+          summary.batonBoostReceived === undefined ? '-' : String(summary.batonBoostReceived),
         ]),
       )
     }

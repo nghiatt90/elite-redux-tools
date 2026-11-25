@@ -765,6 +765,80 @@ The measured policy does NOT include the known open fixes cycle946gb (Magic Boun
 
 No overall pass or fail is declared here; Yoshi reads the logs and decides.
 
+#### Run 3 (after s20g)
+
+Run settings: 80 games per policy per fight, 200-turn cap, seed offset 0, measured at commit `786cb8c` plus this cycle's observer-only Baton Pass counters, six processes in parallel on 8 cores (so ms/game is a contended figure; time is recorded, not gated).
+
+| Fight | Policy | Run 3 wins/games | Run 2 wins | Run 1 wins | Rate | Wilson | ms/game | Capped | Boost available/used | Boosted / attacked boosted | Any positive stage |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| TRAINER_SIDNEY-attack | role | 1/80 | 1/80 | 1/80 | 1.3% | [0.002, 0.067] | 1009.8 | 0 | 155/0 | 0 / 0 | 9 |
+| TRAINER_SIDNEY-attack | expectimax | 71/80 | 71/80 | 71/80 | 88.8% | [0.800, 0.940] | 1973.3 | 0 | 298/100 | 102 / 28 | 218 |
+| TRAINER_PHOEBE-attack | role | 60/80 | 60/80 | 60/80 | 75.0% | [0.645, 0.832] | 1102.1 | 0 | 40/0 | 0 / 0 | 0 |
+| TRAINER_PHOEBE-attack | expectimax | 15/80 | 15/80 | 15/80 | 18.8% | [0.117, 0.287] | 1615.1 | 0 | 276/4 | 10 / 10 | 10 |
+| TRAINER_GLACIA-attack | role | 0/80 | 0/80 | 0/80 | 0.0% | [0.000, 0.046] | 1115.7 | 0 | 105/0 | 0 / 0 | 1 |
+| TRAINER_GLACIA-attack | expectimax | 0/80 | 0/80 | 0/80 | 0.0% | [0.000, 0.046] | 1659.8 | 0 | 307/38 | 79 / 53 | 123 |
+| TRAINER_DRAKE-attack | role | 1/80 | 1/80 | 2/80 | 1.3% | [0.002, 0.067] | 904.1 | 0 | 132/32 | 32 / 0 | 73 |
+| TRAINER_DRAKE-attack | expectimax | 30/80 | 30/80 | 30/80 | 37.5% | [0.277, 0.485] | 2045.9 | 0 | 404/19 | 23 / 20 | 75 |
+| TRAINER_STEVEN-attack | role | 0/80 | 0/80 | 0/80 | 0.0% | [0.000, 0.046] | 712.9 | 0 | 72/0 | 0 / 0 | 0 |
+| TRAINER_STEVEN-attack | expectimax | 0/80 | 0/80 | 0/80 | 0.0% | [0.000, 0.046] | 1318.7 | 0 | 202/0 | 0 / 0 | 80 |
+| TRAINER_GLACIA-stall | role | 3/80 | 3/80 | 3/80 | 3.8% | [0.013, 0.105] | 2602.5 | 0 | 304/0 | 0 / 0 | 224 |
+| TRAINER_GLACIA-stall | expectimax | 5/80 | 5/80 | 5/80 | 6.3% | [0.027, 0.138] | 5818.1 | 0 | 452/0 | 0 / 0 | 185 |
+
+`Boosted` / `attacked boosted` use the cycles20eb own-boost definition, so they are comparable with Run 2, not with Run 1.
+
+Baton Pass own boosts (Runs 1 and 2 did not measure these):
+
+| Fight | Policy | Own-boost step fired | Boost passes | Boost received |
+| --- | --- | --- | --- | --- |
+| TRAINER_SIDNEY-attack | role | 0 | 0 | 0 |
+| TRAINER_SIDNEY-attack | expectimax | - | 8 | 4 |
+| TRAINER_PHOEBE-attack | role | 0 | 0 | 0 |
+| TRAINER_PHOEBE-attack | expectimax | - | 0 | 0 |
+| TRAINER_GLACIA-attack | role | 0 | 0 | 0 |
+| TRAINER_GLACIA-attack | expectimax | - | 3 | 3 |
+| TRAINER_DRAKE-attack | role | 32 | 16 | 16 |
+| TRAINER_DRAKE-attack | expectimax | - | 0 | 0 |
+| TRAINER_STEVEN-attack | role | 0 | 0 | 0 |
+| TRAINER_STEVEN-attack | expectimax | - | 0 | 0 |
+| TRAINER_GLACIA-stall | role | 0 | 0 | 0 |
+| TRAINER_GLACIA-stall | expectimax | - | 0 | 0 |
+
+All five attack fixture teams carry a `support` with Baton Pass (Mr. Mime, `MOVE_BATON_PASS`); the stall team has neither. `Own-boost step fired` is read from the role policy's trace, so the expectimax row is `-`.
+
+AI voluntary switches (turn counts; what our policy did on those turns):
+
+| Fight | Policy | AI switches | Our action on those turns |
+| --- | --- | --- | --- |
+| TRAINER_SIDNEY-attack | role | 0 | none |
+| TRAINER_SIDNEY-attack | expectimax | 0 | none |
+| TRAINER_PHOEBE-attack | role | 0 | none |
+| TRAINER_PHOEBE-attack | expectimax | 0 | none |
+| TRAINER_GLACIA-attack | role | 1 | MOVE_MOONBLAST=1 |
+| TRAINER_GLACIA-attack | expectimax | 3 | MOVE_MOONBLAST=2, MOVE_SNIPE_SHOT=1 |
+| TRAINER_DRAKE-attack | role | 2 | MOVE_SHOCKING_JAB=2 |
+| TRAINER_DRAKE-attack | expectimax | 75 | MOVE_MOONBLAST=57, SWITCH=18 |
+| TRAINER_STEVEN-attack | role | 0 | none |
+| TRAINER_STEVEN-attack | expectimax | 0 | none |
+| TRAINER_GLACIA-stall | role | 0 | none |
+| TRAINER_GLACIA-stall | expectimax | 5 | MOVE_ASTEROID_DOWNFALL=4, MOVE_FIRE_BLAST=1 |
+
+Per-fight verdict as the rule gives it (from `classifyWinRates`; `uninformative` is not a fail), with whether the two Wilson intervals overlap:
+
+- `TRAINER_SIDNEY-attack`: `role<expectimax`; intervals do not overlap (role [0.002, 0.067], expectimax [0.800, 0.940]).
+- `TRAINER_PHOEBE-attack`: `role>=expectimax`; intervals do not overlap (role [0.645, 0.832], expectimax [0.117, 0.287]).
+- `TRAINER_GLACIA-attack`: `uninformative`; intervals overlap ([0.000, 0.046] both).
+- `TRAINER_DRAKE-attack`: `role<expectimax`; intervals do not overlap (role [0.002, 0.067], expectimax [0.277, 0.485]).
+- `TRAINER_STEVEN-attack`: `uninformative`; intervals overlap ([0.000, 0.046] both).
+- `TRAINER_GLACIA-stall`: `uninformative`; intervals overlap (role [0.013, 0.105], expectimax [0.027, 0.138]).
+
+The pass rule (plan Step 2.0b): on every informative fight the role policy wins at least as often as expectimax, clearly more on the stall fight and where Mr. Mime's boosts decide; a fail stops Steps 1.3 and 2.x. Informative fights that violate "at least as often" (the report's own section): `TRAINER_SIDNEY-attack` (role 1/80 vs expectimax 71/80) and `TRAINER_DRAKE-attack` (role 1/80 vs expectimax 30/80).
+
+Battle logs: `docs/battle-sim/role-policy-logs/role-TRAINER_SIDNEY-attack.log`, `role-TRAINER_PHOEBE-attack.log`, `role-TRAINER_GLACIA-attack.log`, `role-TRAINER_DRAKE-attack.log`, `role-TRAINER_STEVEN-attack.log`, `role-TRAINER_GLACIA-stall.log` (role games 1 and 2 of each fight). Run 2's per-fight JSON and logs were overwritten (git history at commit `536f8c6`; Run 2's report is `docs/battle-sim/role-policy-gate-report-run2.md`); all six log files came out byte-identical to Run 2's, so no log changed.
+
+This run includes 946gb, s20c2bc, s20c2bd, s20g and s20gb; design question 1 of `docs/battle-sim/role-policy-diagnosis.md` was answered by s20g, and questions 2 to 5 are not implemented.
+
+No overall pass or fail is declared here; Yoshi reads the logs and decides.
+
 ### Step 2.1 results (cycle942)
 Landed: `web/src/engine/sim/driver/satisficingSearch.ts` (pure, headless, one unit per evaluator, evaluation and neighbour generation injected), covering decision 7 (a)-(d): the start build sampled on report seeds and returning immediately when `won`, screening by `fitnessValue`, at most `FINALISTS` (3) tuning samples per round in screen order, at most 3 report-seed confirmations, `UNIT_CAP` (6000, placeholder) with a per-run overshoot, `noNeighbours`, the highest-tuning-rate incumbent move, and the report-seed re-scoring of up to 3 candidates for units that end not reliably `won`. Candidate records carry `change` (`teamDiff`, decision 9a), `screenFitness`, `tuneVerdict/Wins/Games` and `reportVerdict/Wins/Games`; results carry `fragilityChecked: false` and `whatToChange: []` when `won`. `solver.ts` only exports `shuffled`. Tests: `cycle942SatisficingSearch.test.ts` (9 tests, fake evaluator, hand-derived game counts and seeds).
 Left: the Step 1.2 report writer (JSON + markdown), Step 2.2 (battle summary and loss anatomy), and wiring into `solverCli.ts`/`solverWorker.ts` with `improveTeam` removed. Fragility (2.3) is not modelled, so "reliably `won`" is verdict `won` only.

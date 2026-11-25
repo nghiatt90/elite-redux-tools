@@ -9,7 +9,7 @@
     "rate": 0.0375,
     "lower": 0.012834336300788757,
     "upper": 0.10454891974394322,
-    "msPerGame": 2648.718190899999,
+    "msPerGame": 2602.5258008125006,
     "capped": 0,
     "available": 304,
     "used": 0,
@@ -17,7 +17,10 @@
     "attackedWhileBoosted": 0,
     "positiveStage": 224,
     "aiSwitches": 0,
-    "aiSwitchByThing": {}
+    "aiSwitchByThing": {},
+    "batonBoostFired": 0,
+    "batonBoostPasses": 0,
+    "batonBoostReceived": 0
   },
   "expectimax": {
     "policy": "expectimax",
@@ -26,7 +29,7 @@
     "rate": 0.0625,
     "lower": 0.026988977697985535,
     "upper": 0.1381032915335177,
-    "msPerGame": 5739.190551987496,
+    "msPerGame": 5818.083908787498,
     "capped": 0,
     "available": 452,
     "used": 0,
@@ -37,7 +40,10 @@
     "aiSwitchByThing": {
       "MOVE_ASTEROID_DOWNFALL": 4,
       "MOVE_FIRE_BLAST": 1
-    }
+    },
+    "batonBoostFired": 0,
+    "batonBoostPasses": 0,
+    "batonBoostReceived": 0
   },
   "classification": "uninformative",
   "logFiles": [

@@ -9,7 +9,7 @@
     "rate": 0,
     "lower": -3.469446951953614e-18,
     "upper": 0.0458197362645751,
-    "msPerGame": 1176.9834424875003,
+    "msPerGame": 1115.7403938500006,
     "capped": 0,
     "available": 105,
     "used": 0,
@@ -19,7 +19,10 @@
     "aiSwitches": 1,
     "aiSwitchByThing": {
       "MOVE_MOONBLAST": 1
-    }
+    },
+    "batonBoostFired": 0,
+    "batonBoostPasses": 0,
+    "batonBoostReceived": 0
   },
   "expectimax": {
     "policy": "expectimax",
@@ -28,7 +31,7 @@
     "rate": 0,
     "lower": -3.469446951953614e-18,
     "upper": 0.0458197362645751,
-    "msPerGame": 1626.2379721250015,
+    "msPerGame": 1659.797752975,
     "capped": 0,
     "available": 307,
     "used": 38,
@@ -39,7 +42,10 @@
     "aiSwitchByThing": {
       "MOVE_MOONBLAST": 2,
       "MOVE_SNIPE_SHOT": 1
-    }
+    },
+    "batonBoostFired": 0,
+    "batonBoostPasses": 3,
+    "batonBoostReceived": 3
   },
   "classification": "uninformative",
   "logFiles": [
