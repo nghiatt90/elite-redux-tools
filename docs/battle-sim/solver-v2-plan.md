@@ -658,6 +658,8 @@ Order (seventh revision, 2026-11-24): **2.0 (policy gate)** -> 1.3 (set pools) -
 
 ### Step 2.0b results (cycles20e)
 
+#### Run 1 (before 946f, 946g, s20ccb, s20c2bb, s20eb, s20f1)
+
 Run settings: 80 games per policy per fight, 200-turn cap, seed offset 0, measured at commit `ec651c9`, six processes in parallel on 8 cores (so ms/game is a contended figure; time is recorded, not gated).
 
 | Fight | Policy | Wins/games | Rate | Wilson | ms/game | Capped | Boost available/used | Boosted / attacked boosted |
@@ -706,6 +708,61 @@ Per-fight verdict as the rule gives it (from `classifyWinRates`; `uninformative`
 Battle logs: `docs/battle-sim/role-policy-logs/role-TRAINER_SIDNEY-attack.log`, `role-TRAINER_PHOEBE-attack.log`, `role-TRAINER_GLACIA-attack.log`, `role-TRAINER_DRAKE-attack.log`, `role-TRAINER_STEVEN-attack.log`, `role-TRAINER_GLACIA-stall.log` (role games 1 and 2 of each fight).
 
 No overall pass or fail is declared here; Yoshi reads the logs and decides (a fail stops Steps 1.3 and 2.x). The measured policy does NOT include two known open fixes: 946f (staller and support status-move gates in `rolePolicy.ts` that let a failing move be chosen again every turn) and s20ccb (the counter purpose's bench-side speed check ignores move priority); both can affect these numbers.
+
+#### Run 2 (cycles20f2)
+
+Run settings: 80 games per policy per fight, 200-turn cap, seed offset 0, measured at commit `8bf1d39`, six processes in parallel on 8 cores (so ms/game is a contended figure; time is recorded, not gated).
+
+| Fight | Policy | Run 2 wins/games | Run 1 wins/games | Rate | Wilson | ms/game | Capped | Boost available/used | Boosted / attacked boosted | Any positive stage |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| TRAINER_SIDNEY-attack | role | 1/80 | 1/80 | 1.3% | [0.002, 0.067] | 1091.4 | 0 | 155/0 | 0 / 0 | 9 |
+| TRAINER_SIDNEY-attack | expectimax | 71/80 | 71/80 | 88.8% | [0.800, 0.940] | 2041.7 | 0 | 298/100 | 102 / 28 | 218 |
+| TRAINER_PHOEBE-attack | role | 60/80 | 60/80 | 75.0% | [0.645, 0.832] | 1186.9 | 0 | 40/0 | 0 / 0 | 0 |
+| TRAINER_PHOEBE-attack | expectimax | 15/80 | 15/80 | 18.8% | [0.117, 0.287] | 1588.9 | 0 | 276/4 | 10 / 10 | 10 |
+| TRAINER_GLACIA-attack | role | 0/80 | 0/80 | 0.0% | [0.000, 0.046] | 1177.0 | 0 | 105/0 | 0 / 0 | 1 |
+| TRAINER_GLACIA-attack | expectimax | 0/80 | 0/80 | 0.0% | [0.000, 0.046] | 1626.2 | 0 | 307/38 | 79 / 53 | 123 |
+| TRAINER_DRAKE-attack | role | 1/80 | 2/80 | 1.3% | [0.002, 0.067] | 968.8 | 0 | 132/32 | 32 / 0 | 73 |
+| TRAINER_DRAKE-attack | expectimax | 30/80 | 30/80 | 37.5% | [0.277, 0.485] | 2118.4 | 0 | 404/19 | 23 / 20 | 75 |
+| TRAINER_STEVEN-attack | role | 0/80 | 0/80 | 0.0% | [0.000, 0.046] | 784.6 | 0 | 72/0 | 0 / 0 | 0 |
+| TRAINER_STEVEN-attack | expectimax | 0/80 | 0/80 | 0.0% | [0.000, 0.046] | 1389.2 | 0 | 202/0 | 0 / 0 | 80 |
+| TRAINER_GLACIA-stall | role | 3/80 | 3/80 | 3.8% | [0.013, 0.105] | 2648.7 | 0 | 304/0 | 0 / 0 | 224 |
+| TRAINER_GLACIA-stall | expectimax | 5/80 | 5/80 | 6.3% | [0.027, 0.138] | 5739.2 | 0 | 452/0 | 0 / 0 | 185 |
+
+`Boosted` / `attacked boosted` now count only a mon's own boosting since its current switch-in (cycles20eb), so they are not comparable with Run 1's columns.
+
+AI voluntary switches (turn counts; what our policy did on those turns):
+
+| Fight | Policy | AI switches | Our action on those turns |
+| --- | --- | --- | --- |
+| TRAINER_SIDNEY-attack | role | 0 | none |
+| TRAINER_SIDNEY-attack | expectimax | 0 | none |
+| TRAINER_PHOEBE-attack | role | 0 | none |
+| TRAINER_PHOEBE-attack | expectimax | 0 | none |
+| TRAINER_GLACIA-attack | role | 1 | MOVE_MOONBLAST=1 |
+| TRAINER_GLACIA-attack | expectimax | 3 | MOVE_MOONBLAST=2, MOVE_SNIPE_SHOT=1 |
+| TRAINER_DRAKE-attack | role | 2 | MOVE_SHOCKING_JAB=2 |
+| TRAINER_DRAKE-attack | expectimax | 75 | MOVE_MOONBLAST=57, SWITCH=18 |
+| TRAINER_STEVEN-attack | role | 0 | none |
+| TRAINER_STEVEN-attack | expectimax | 0 | none |
+| TRAINER_GLACIA-stall | role | 0 | none |
+| TRAINER_GLACIA-stall | expectimax | 5 | MOVE_ASTEROID_DOWNFALL=4, MOVE_FIRE_BLAST=1 |
+
+Per-fight verdict as the rule gives it (from `classifyWinRates`; `uninformative` is not a fail), with whether the two Wilson intervals overlap:
+
+- `TRAINER_SIDNEY-attack`: `role<expectimax`; intervals do not overlap (role [0.002, 0.067], expectimax [0.800, 0.940]).
+- `TRAINER_PHOEBE-attack`: `role>=expectimax`; intervals do not overlap (role [0.645, 0.832], expectimax [0.117, 0.287]).
+- `TRAINER_GLACIA-attack`: `uninformative`; intervals overlap ([0.000, 0.046] both).
+- `TRAINER_DRAKE-attack`: `role<expectimax`; intervals do not overlap (role [0.002, 0.067], expectimax [0.277, 0.485]).
+- `TRAINER_STEVEN-attack`: `uninformative`; intervals overlap ([0.000, 0.046] both).
+- `TRAINER_GLACIA-stall`: `uninformative`; intervals overlap (role [0.013, 0.105], expectimax [0.027, 0.138]).
+
+The pass rule (plan Step 2.0b): on every informative fight the role policy wins at least as often as expectimax, clearly more on the stall fight and where Mr. Mime's boosts decide; a fail stops Steps 1.3 and 2.x. Informative fights that violate "at least as often" (the report's own section): `TRAINER_SIDNEY-attack` (role 1/80 vs expectimax 71/80) and `TRAINER_DRAKE-attack` (role 1/80 vs expectimax 30/80).
+
+Battle logs: `docs/battle-sim/role-policy-logs/role-TRAINER_SIDNEY-attack.log`, `role-TRAINER_PHOEBE-attack.log`, `role-TRAINER_GLACIA-attack.log`, `role-TRAINER_DRAKE-attack.log`, `role-TRAINER_STEVEN-attack.log`, `role-TRAINER_GLACIA-stall.log` (role games 1 and 2 of each fight). Run 1's logs and per-fight JSON were overwritten (they are in git history at commit `0dafef3`; Run 1's report is `docs/battle-sim/role-policy-gate-report-run1.md`), so log paths and log line numbers cited for Run 1, including those in `docs/battle-sim/role-policy-diagnosis.md`, refer to the old files.
+
+The measured policy does NOT include the known open fixes cycle946gb (Magic Bounce read from the ability bitfield), s20c2bc (PP-loop Toxic Spikes check) and s20c2bd (Hot Coals and Caltrops on switch-in), and none of the design questions in `docs/battle-sim/role-policy-diagnosis.md` has been implemented.
+
+No overall pass or fail is declared here; Yoshi reads the logs and decides.
 
 ### Step 2.1 results (cycle942)
 Landed: `web/src/engine/sim/driver/satisficingSearch.ts` (pure, headless, one unit per evaluator, evaluation and neighbour generation injected), covering decision 7 (a)-(d): the start build sampled on report seeds and returning immediately when `won`, screening by `fitnessValue`, at most `FINALISTS` (3) tuning samples per round in screen order, at most 3 report-seed confirmations, `UNIT_CAP` (6000, placeholder) with a per-run overshoot, `noNeighbours`, the highest-tuning-rate incumbent move, and the report-seed re-scoring of up to 3 candidates for units that end not reliably `won`. Candidate records carry `change` (`teamDiff`, decision 9a), `screenFitness`, `tuneVerdict/Wins/Games` and `reportVerdict/Wins/Games`; results carry `fragilityChecked: false` and `whatToChange: []` when `won`. `solver.ts` only exports `shuffled`. Tests: `cycle942SatisficingSearch.test.ts` (9 tests, fake evaluator, hand-derived game counts and seeds).
