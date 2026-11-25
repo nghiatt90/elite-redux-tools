@@ -1073,16 +1073,17 @@ export function blocksStatusMove(
   deps: StatusBlockDeps,
 ): boolean {
   const attackerBattler = state.battlers[attackerId]
-  const targetBattler = state.battlers[targetId]
-  if (!attackerBattler || !targetBattler) return false
+  if (!attackerBattler) return false
 
   const moveData = deps.dataContext.move(moveId)
   if (moveData?.split !== 'STATUS') return false
 
-  const isSelfTarget = targetId === attackerId || moveData.target === 'USER'
+  const cTarget = moveData.target === 'USER' || moveData.target === 'ALL_BATTLERS' ? attackerId : targetId
+  const targetBattler = state.battlers[cTarget]
+  if (!targetBattler) return false
 
   const resolvedType =
-    (deps.damage?.moveType ? deps.damage.moveType(state, attackerId, targetId, moveId).moveType : null) ??
+    (deps.damage?.moveType ? deps.damage.moveType(state, attackerId, cTarget, moveId).moveType : null) ??
     moveData.type ??
     'NORMAL'
 
@@ -1093,19 +1094,32 @@ export function blocksStatusMove(
     attackerHasMoldBreakerActive(attackerBattler, deps)
 
   // Attacker-held Radiance (abilities.cc:5545-5551): APPLY_ON_ANY, blocks DARK status moves
-  // on any target including the user's own (e.g. Nasty Plot). Attacker cannot mold-break itself.
+  // on any target including the user's own (e.g. Hone Claws). Attacker cannot mold-break itself.
   if (resolvedType === 'DARK' && battlerHasAbility(attackerUnsuppressedSlots, 'ABILITY_RADIANCE', () => false)) {
     return true
   }
 
-  const targetUnsuppressedSlots = getUnsuppressedSlots(state, targetBattler, attackerId, deps.dataContext)
+  const skipImmunityScan = cTarget === attackerId || moveData.target === 'USER_OR_ALLY'
 
-  // When not self-targeting, run the full ability immunity scan on the target
-  if (!isSelfTarget) {
+  if (skipImmunityScan) {
+    if (resolvedType === 'DARK' && !attackerHasMoldBreaker) {
+      const oppId = attackerId ^ 1
+      if (isBattlerAlive(state, oppId)) {
+        const oppBattler = state.battlers[oppId]
+        if (oppBattler) {
+          const oppUnsuppressedSlots = getUnsuppressedSlots(state, oppBattler, attackerId, deps.dataContext)
+          if (battlerHasAbility(oppUnsuppressedSlots, 'ABILITY_RADIANCE', () => false)) {
+            return true
+          }
+        }
+      }
+    }
+  } else {
+    const targetUnsuppressedSlots = getUnsuppressedSlots(state, targetBattler, attackerId, deps.dataContext)
     let movePriority = 0
     if (!state.processingExtraAttacks) {
       const moveView = buildMoveView(moveId, deps, state, attackerId)
-      movePriority = getMovePriority(state, attackerId, moveView, targetId)
+      movePriority = getMovePriority(state, attackerId, moveView, cTarget)
     }
 
     const weather = weatherFromBitfield(state.field.weather).weather
@@ -1145,7 +1159,7 @@ export function blocksStatusMove(
     !attackerBattler.round.usesBouncedMove &&
     targetHasMagicBounce
 
-  if (!isMagicBounceExempt && blocksPrankster(state, moveId, attackerId, targetId, true, deps)) {
+  if (!isMagicBounceExempt && blocksPrankster(state, moveId, attackerId, cTarget, true, deps)) {
     return true
   }
 

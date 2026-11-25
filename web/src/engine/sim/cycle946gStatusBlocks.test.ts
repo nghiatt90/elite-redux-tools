@@ -5,7 +5,7 @@
 //  2. Prankster Toxic into Dark target with Magic Bounce (bounced, not Dark-blocked).
 //  3. Good As Gold blocks Will-O-Wisp; Mold Breaker lands it; Gastro-Acid-suppressed Good As Gold lands it.
 //  4. Soundproof blocks sound status move but not holder's self-target sound move (Howl); Bulletproof (Tar Shot); Dazzling blocks Prankster Thunder Wave.
-//  5. Radiance on target blocks Dark status move (Fake Tears); Radiance on user blocks user's own Dark status move (Nasty Plot).
+//  5. Radiance on target blocks Dark status move (Fake Tears); Radiance on user or foe blocks user's own Dark status move (Hone Claws).
 //  6. Volt Absorb (Thunder Wave heals floor(maxHp/4)), Lightning Rod (+1 higher attack stat), Motor Drive (+1 Speed), Flash Fire (sets volatiles.flashFire, no burn), Mold Breaker Thunder Wave into Volt Absorb paralyses without heal, missed Thunder Wave into Volt Absorb does not heal.
 //  7. Magic Bounced status move into original user with Good As Gold: no status on either side.
 //  8. Policy: staller does not pick Thunder Wave (Dark target with Prankster; Volt Absorb), Will-O-Wisp (Flash Fire), Leech Seed or Ghost Curse (Good As Gold); does pick them with Mold Breaker or non-Prankster user where sim lets them land.
@@ -220,8 +220,8 @@ describe('cycle 946g - Status Move Ability Immunity and Prankster Block', () => 
     expect(s4.state.battlers[1]!.mon.status1).toBe(0)
   })
 
-  // Case 5: Radiance on target blocks Dark status move; Radiance on user blocks user's own Dark status move
-  it('Radiance on target blocks Dark status move; Radiance on user blocks user own Dark status move', () => {
+  // Case 5: Radiance on target blocks Dark status move; Radiance on user or foe blocks user's own Dark status move (Hone Claws)
+  it('Radiance on target blocks Dark status move; Radiance blocks user own Dark status move (Hone Claws)', () => {
     // Radiance on target blocks Fake Tears (Dark status move)
     const s1 = session(playerOne(['MOVE_FAKE_TEARS', 'MOVE_BODY_SLAM']), [
       idle('SPECIES_SNORLAX', IDLE_MOVES, { ability: 'ABILITY_RADIANCE' }),
@@ -230,13 +230,34 @@ describe('cycle 946g - Status Move Ability Immunity and Prankster Block', () => 
     forceMove(s1, 'MOVE_FAKE_TEARS')
     expect(s1.state.battlers[1]!.mon.statStages[STAT_SPDEF]).toBe(initialSpDefStage)
 
-    // Radiance on user blocks user's own Nasty Plot (Dark status move)
-    const s2 = session(playerOne(['MOVE_NASTY_PLOT', 'MOVE_BODY_SLAM'], 'ABILITY_RADIANCE'), [
+    // Radiance on user blocks user's own Hone Claws (Dark status move)
+    const s2 = session(playerOne(['MOVE_HONE_CLAWS', 'MOVE_BODY_SLAM'], 'ABILITY_RADIANCE'), [
       idle('SPECIES_SNORLAX', IDLE_MOVES),
     ])
-    const initialSpAtkStage = s2.state.battlers[0]!.mon.statStages[3] ?? DEFAULT_STAT_STAGE
-    forceMove(s2, 'MOVE_NASTY_PLOT')
-    expect(s2.state.battlers[0]!.mon.statStages[3]).toBe(initialSpAtkStage)
+    const initialAtkStage = s2.state.battlers[0]!.mon.statStages[STAT_ATK] ?? DEFAULT_STAT_STAGE
+    forceMove(s2, 'MOVE_HONE_CLAWS')
+    expect(s2.state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(initialAtkStage)
+
+    // Negative case: no Radiance on either side, Hone Claws gives Attack stage +1
+    const s3 = session(playerOne(['MOVE_HONE_CLAWS', 'MOVE_BODY_SLAM']), [
+      idle('SPECIES_SNORLAX', IDLE_MOVES),
+    ])
+    forceMove(s3, 'MOVE_HONE_CLAWS')
+    expect(s3.state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(initialAtkStage + 1)
+
+    // Radiance on the FOE only: user's Hone Claws leaves Attack unchanged
+    const s4 = session(playerOne(['MOVE_HONE_CLAWS', 'MOVE_BODY_SLAM']), [
+      idle('SPECIES_SNORLAX', IDLE_MOVES, { ability: 'ABILITY_RADIANCE' }),
+    ])
+    forceMove(s4, 'MOVE_HONE_CLAWS')
+    expect(s4.state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(initialAtkStage)
+
+    // Mold Breaker user with Radiance foe: Hone Claws gives Attack stage +1
+    const s5 = session(playerOne(['MOVE_HONE_CLAWS', 'MOVE_BODY_SLAM'], 'ABILITY_MOLD_BREAKER'), [
+      idle('SPECIES_SNORLAX', IDLE_MOVES, { ability: 'ABILITY_RADIANCE' }),
+    ])
+    forceMove(s5, 'MOVE_HONE_CLAWS')
+    expect(s5.state.battlers[0]!.mon.statStages[STAT_ATK]).toBe(initialAtkStage + 1)
   })
 
   // Case 6: Volt Absorb, Lightning Rod, Motor Drive, Flash Fire, Mold Breaker bypass, and Missed Thunder Wave
