@@ -22,16 +22,20 @@ import {
   STATUS1_PARALYSIS,
   STATUS1_POISON_ANY,
   STATUS3_GASTRO_ACID,
+  STATUS_FIELD_ION_DELUGE,
+  WEATHER_SANDSTORM_TEMPORARY,
 } from './constants'
 import { buildPlayerParty } from './driver/buildParty'
 import type { PlayerMonSpec } from './driver/buildParty'
 import type { PlayerChoice } from './driver/expectimax'
 import { legalChoices } from './driver/expectimax'
 import { loadSimData, type TrainerData, type TrainerMonData } from './driver/loadSimData'
+import type { PolicyTraceEntry } from './driver/policyBattle'
 import type { RoleMemory } from './driver/rolePolicy'
 import { chooseRoleAction } from './driver/rolePolicy'
 import type { BattleSession } from './driver/session'
 import { beginTurn, buildMoveAction, createSession, stepTurn } from './driver/session'
+import { createTeamLayer } from './driver/teamLayer'
 import type { BattleState, RandomSource } from './state'
 import { createRandomSource } from './rng'
 
@@ -160,8 +164,8 @@ describe('cycle 946g - Status Move Ability Immunity and Prankster Block', () => 
 
   // Case 3: Good As Gold blocks Will-O-Wisp; Mold Breaker lands it; Gastro Acid suppresses it
   it('Good As Gold blocks Will-O-Wisp; Mold Breaker user lands it; Gastro-Acid-suppressed Good As Gold does not block', () => {
-    // Good As Gold blocks Will-O-Wisp
-    const s1 = session(playerOne(['MOVE_WILL_O_WISP', 'MOVE_BODY_SLAM']), [
+    // Good As Gold blocks Will-O-Wisp (control: non-Mold-Breaker user does not burn)
+    const s1 = session(playerOne(['MOVE_WILL_O_WISP', 'MOVE_BODY_SLAM'], 'ABILITY_GUTS'), [
       idle('SPECIES_SNORLAX', IDLE_MOVES, { ability: 'ABILITY_GOOD_AS_GOLD' }),
     ])
     forceMove(s1, 'MOVE_WILL_O_WISP')
@@ -174,7 +178,7 @@ describe('cycle 946g - Status Move Ability Immunity and Prankster Block', () => 
     forceMove(s2, 'MOVE_WILL_O_WISP')
     expect((s2.state.battlers[1]!.mon.status1 & STATUS1_BURN) !== 0).toBe(true)
 
-    // Mold Breaker Gastro Acid suppresses Good As Gold, then Will-O-Wisp lands
+    // Mold Breaker Gastro Acid suppresses Good As Gold, then Will-O-Wisp lands even with non-Mold-Breaker user
     // Note: in Elite Redux, Gastro Acid also applies Poison on hit. We clear status1 so Will-O-Wisp can inflict Burn.
     const s3 = session(playerOne(['MOVE_GASTRO_ACID', 'MOVE_WILL_O_WISP', 'MOVE_BODY_SLAM'], 'ABILITY_MOLD_BREAKER'), [
       idle('SPECIES_MACHAMP', IDLE_MOVES, { ability: 'ABILITY_GOOD_AS_GOLD' }),
@@ -182,6 +186,10 @@ describe('cycle 946g - Status Move Ability Immunity and Prankster Block', () => 
     forceMove(s3, 'MOVE_GASTRO_ACID')
     expect((s3.state.battlers[1]!.statuses3 & STATUS3_GASTRO_ACID) !== 0).toBe(true)
     patchMon(s3.state, 1, 0, { status1: 0 })
+    s3.state.battlers[0]!.mon.abilities = {
+      ability: 'ABILITY_GUTS',
+      innates: [null, null, null],
+    }
     forceMove(s3, 'MOVE_WILL_O_WISP')
     expect((s3.state.battlers[1]!.mon.status1 & STATUS1_BURN) !== 0).toBe(true)
   })
@@ -318,6 +326,22 @@ describe('cycle 946g - Status Move Ability Immunity and Prankster Block', () => 
     forceMove(s6, 'MOVE_THUNDER_WAVE')
     expect(s6.state.battlers[1]!.mon.status1).toBe(0)
     expect(s6.state.battlers[1]!.mon.hp).toBe(damagedHp)
+
+    // User with Mold Breaker and Volt Absorb using Ion Deluge (Electric status move) heals and is not suppressed by own Mold Breaker
+    expect(data.dataContext.move('MOVE_ION_DELUGE')?.type).toBe('ELECTRIC')
+    const s7 = session(playerOne(['MOVE_ION_DELUGE', 'MOVE_BODY_SLAM'], 'ABILITY_MOLD_BREAKER'), [
+      idle('SPECIES_RATICATE', IDLE_MOVES),
+    ])
+    s7.state.battlers[0]!.mon.abilities = {
+      ability: 'ABILITY_MOLD_BREAKER',
+      innates: ['ABILITY_VOLT_ABSORB', null, null],
+    }
+    const maxHp7 = s7.state.battlers[0]!.mon.maxHp
+    const damagedHp7 = Math.floor(maxHp7 / 2)
+    patchMon(s7.state, 0, 0, { hp: damagedHp7 })
+    forceMove(s7, 'MOVE_ION_DELUGE')
+    expect(s7.state.battlers[0]!.mon.hp).toBe(damagedHp7 + Math.floor(maxHp7 / 4))
+    expect((s7.state.field.statuses & STATUS_FIELD_ION_DELUGE) !== 0).toBe(false)
   })
 
   // Case 7: Magic Bounced status move into original user with Good As Gold
@@ -396,5 +420,74 @@ describe('cycle 946g - Status Move Ability Immunity and Prankster Block', () => 
     ])
     beginTurn(s5Neg)
     expect(moveId(chooseRoleAction(s5Neg, 'staller', {}, memory()))).toBe('MOVE_CURSE')
+  })
+
+  // Case 9: Weather-dependent ability immunity (Sand Guard) and weather suppression (Cloud Nine)
+  it('Sand Guard blocks Prankster Thunder Wave in sandstorm; Cloud Nine suppresses weather and allows paralysis', () => {
+    // Sand Guard in sandstorm blocks priority move (Prankster Thunder Wave)
+    const s1 = session(playerOne(['MOVE_THUNDER_WAVE', 'MOVE_BODY_SLAM'], 'ABILITY_PRANKSTER'), [
+      idle('SPECIES_SNORLAX', IDLE_MOVES, { ability: 'ABILITY_SAND_GUARD' }),
+    ])
+    s1.state.field.weather = WEATHER_SANDSTORM_TEMPORARY
+    forceMove(s1, 'MOVE_THUNDER_WAVE')
+    expect(s1.state.battlers[1]!.mon.status1).toBe(0)
+
+    // With Cloud Nine on the field, weather has no effect, so Sand Guard does not block and Thunder Wave paralyses
+    const s2 = session(playerOne(['MOVE_THUNDER_WAVE', 'MOVE_BODY_SLAM'], 'ABILITY_PRANKSTER'), [
+      idle('SPECIES_SNORLAX', IDLE_MOVES, { ability: 'ABILITY_SAND_GUARD' }),
+    ], {}, scriptedRng([0]))
+    s2.state.field.weather = WEATHER_SANDSTORM_TEMPORARY
+    s2.state.battlers[0]!.mon.abilities = {
+      ability: 'ABILITY_PRANKSTER',
+      innates: ['ABILITY_CLOUD_NINE', null, null],
+    }
+    forceMove(s2, 'MOVE_THUNDER_WAVE')
+    expect((s2.state.battlers[1]!.mon.status1 & STATUS1_PARALYSIS) !== 0).toBe(true)
+  })
+
+  // Case 10: teamLayer statusLandsOnUs checks blocksStatusMove before Gastro Acid suppression
+  it('teamLayer: Good As Gold blocks Gastro Acid so ppLoop incoming evaluates as safe', () => {
+    const layer = createTeamLayer({
+      roles: ['attacker', 'attacker'],
+      genes: {
+        purposeFlags: {
+          preserve: false,
+          sacrifice: false,
+          counter: false,
+          entryAbility: false,
+          support: false,
+          ppLoop: true,
+        },
+      },
+    })
+
+    // Both our active and bench Dusclops have Good As Gold. Foe has Gastro Acid and Tackle (0 dmg to Ghost).
+    // Because Good As Gold blocks Gastro Acid, statusLandsOnUs returns false, and ppLoop fires.
+    const s = session(
+      [
+        { species: 'SPECIES_DUSCLOPS', level: 50, moves: ['MOVE_SHADOW_BALL'], ability: 'ABILITY_GOOD_AS_GOLD' },
+        { species: 'SPECIES_DUSCLOPS', level: 50, moves: ['MOVE_SHADOW_BALL'], ability: 'ABILITY_GOOD_AS_GOLD' },
+      ],
+      [idle('SPECIES_SNORLAX', ['MOVE_GASTRO_ACID', 'MOVE_TACKLE'])],
+    )
+    beginTurn(s)
+    const trace: PolicyTraceEntry[] = []
+    const choice = layer.policy(s, 1, trace)
+    expect(trace[0]!.tags).toEqual(['team', 'ppLoop'])
+    expect(choice!.action.action).toBe('SWITCH')
+
+    // Control: without Good As Gold (e.g. Guts), Gastro Acid lands on us, so ppLoopIncoming returns null and ppLoop does not fire.
+    const sGuts = session(
+      [
+        { species: 'SPECIES_DUSCLOPS', level: 50, moves: ['MOVE_SHADOW_BALL'], ability: 'ABILITY_GUTS' },
+        { species: 'SPECIES_DUSCLOPS', level: 50, moves: ['MOVE_SHADOW_BALL'], ability: 'ABILITY_GOOD_AS_GOLD' },
+      ],
+      [idle('SPECIES_SNORLAX', ['MOVE_GASTRO_ACID', 'MOVE_TACKLE'])],
+    )
+    beginTurn(sGuts)
+    const traceGuts: PolicyTraceEntry[] = []
+    const choiceGuts = layer.policy(sGuts, 1, traceGuts)
+    expect(traceGuts[0]!.tags).not.toEqual(['team', 'ppLoop'])
+    expect(choiceGuts!.action.action).toBe('USE_MOVE')
   })
 })

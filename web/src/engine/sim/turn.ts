@@ -1122,7 +1122,9 @@ export function blocksStatusMove(
       movePriority = getMovePriority(state, attackerId, moveView, cTarget)
     }
 
-    const weather = weatherFromBitfield(state.field.weather).weather
+    const weather = isBattlerWeatherAffected(state, cTarget, state.field.weather, deps)
+      ? weatherFromBitfield(state.field.weather).weather
+      : 'NONE'
 
     if (
       computeIsImmune(
@@ -1200,7 +1202,7 @@ export function getStatusMoveAbsorbingAbility(
   return computeAbsorbingAbility(
     targetUnsuppressedSlots,
     { moveType: resolvedMoveType, moveFlags: moveData.flags ?? {} },
-    attackerHasMoldBreaker,
+    targetId !== attackerId && attackerHasMoldBreaker,
   )
 }
 

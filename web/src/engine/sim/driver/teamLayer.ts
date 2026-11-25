@@ -39,7 +39,7 @@ import type { BattleState, BattlerState } from '../state'
 import { battlerHasSimAbility, isBattlerWeatherAffected } from '../statBuffs'
 import { applySwitchInAbilities, type BattleStartDeps } from '../switchInAbility'
 import { canBeBurned, canBeParalyzed, canBleed, canGetFrostbite } from '../statusEffects'
-import { buildTurnOrderContext } from '../turn'
+import { blocksStatusMove, buildTurnOrderContext } from '../turn'
 import { getMoveSpeed } from '../turnOrder'
 import type { PlayerChoice } from './expectimax'
 import { legalChoices } from './expectimax'
@@ -827,6 +827,8 @@ function statusLandsOnUs(
       // ability immunity cannot protect. An Ability Shield is the one case the
       // suppression really does not happen (Cmd_setgastroacid); adding the flag
       // when already suppressed is idempotent.
+      // attackcanceler precedes setgastroacid: an immunity (e.g. Good As Gold) blocks it.
+      if (blocksStatusMove(probe.state, 1, 0, moveId, deps)) return false
       const target = probe.state.battlers[0]
       if (!target) return false
       const gateProbe = doesBattlerHaveAbilityShield(target, deps) ? probe : withGastroAcid(probe)
@@ -839,6 +841,7 @@ function statusLandsOnUs(
       if (!isBattlerWeatherAffected(probe.state, 1, WEATHER_FOG_ANY, deps)) {
         return statusMoveWorks(probe, moveId, 'EFFECT_WILL_O_WISP', 1, 0)
       }
+      if (blocksStatusMove(probe.state, 1, 0, moveId, deps)) return false
       const target = probe.state.battlers[0]
       if (!target) return false
       const gateProbe = doesBattlerHaveAbilityShield(target, deps) ? probe : withGastroAcid(probe)
