@@ -12,18 +12,33 @@
 // All six purposes are implemented: preserve, sacrifice, counter and the switch
 // mechanism they share (s20c), plus entryAbility, support and the PP stall loop
 // (s20c2). The entry-ability and support probes run on cloned sessions, and the
-// PP loop keeps a per-layer stall counter; none of them touch the real RNG.
+// PP loop keeps a per-layer stall counter plus a latched stop; none of them
+// touch the real RNG.
 //
 // Pure and headless: no React, no I/O. Every game rule cites the C or the data
 // row that fixes it; every threshold a player chose is marked MODEL CHOICE.
 
 import type { AiDamageRolls } from '../ai/aiCalcDamage'
 import { aiDamageRolls } from '../ai/aiCalcDamage'
-import { DEFAULT_STAT_STAGE, STAT_ATK, STATUS_FIELD_TERRAIN_ANY } from '../constants'
+import { doesBattlerHaveAbilityShield } from '../ai/aiAbilityHelpers'
+import {
+  DEFAULT_STAT_STAGE,
+  SIDE_STATUS_SAFEGUARD,
+  STAT_ATK,
+  STATUS1_ANY,
+  STATUS1_BURN,
+  STATUS1_PARALYSIS,
+  STATUS1_POISON_ANY,
+  STATUS3_GASTRO_ACID,
+  STATUS_FIELD_TERRAIN_ANY,
+  WEATHER_FOG_ANY,
+  hasFlag,
+} from '../constants'
 import { canBattlerEscape, isAbilityPreventingEscape, type EscapeDeps } from '../escape'
 import type { BattleState, BattlerState } from '../state'
-import { battlerHasSimAbility } from '../statBuffs'
+import { battlerHasSimAbility, isBattlerWeatherAffected } from '../statBuffs'
 import { applySwitchInAbilities, type BattleStartDeps } from '../switchInAbility'
+import { canBeBurned, canBeParalyzed, canBleed, canGetFrostbite } from '../statusEffects'
 import { buildTurnOrderContext } from '../turn'
 import { getMoveSpeed } from '../turnOrder'
 import type { PlayerChoice } from './expectimax'
@@ -758,9 +773,109 @@ interface PpLoopIncoming {
   hp: number
 }
 
+/** `probe` with `STATUS3_GASTRO_ACID` added to battler 0's statuses3: the state
+ * Gastro Acid leaves behind before it poisons (Cmd_setgastroacid,
+ * battle_script_commands.c:11831-11838). A copy of the battler and of the
+ * battlers array -- the session's own state is never mutated. */
+function withGastroAcid(probe: BattleSession): BattleSession {
+  const battlers = probe.state.battlers.slice()
+  const target = battlers[0]
+  if (!target) return probe
+  battlers[0] = { ...target, statuses3: target.statuses3 | STATUS3_GASTRO_ACID }
+  return { ...probe, state: { ...probe.state, battlers } }
+}
+
+/** Whether their `moveId` can land a non-volatile status on our mon in `slot`
+ * (the active mon, or a bench slot placed at battler 0 by `stateWithReserve`).
+ * Such a foe does NOT qualify for the PP loop: `aiDamageRolls` is null for a
+ * power-0 move, so every switch-in would take the status and the drain would
+ * never become free. Battler 1 is the attacker and battler 0 the target.
+ * Deliberately not covered: Bestow only psycho-shifts onto an ALREADY statused
+ * target (battle_scripts_1.s:1392-1396, 1403-1405), so it never statuses a
+ * clean mon; Toxic Spikes / Caltrops lay a field hazard rather than statusing
+ * the move's target; and protecting moves that status on contact need us to
+ * attack. Damaging moves are untouched -- their damage already counts. */
+function statusLandsOnUs(
+  session: BattleSession,
+  moveId: string,
+  slot: number | 'active',
+): boolean {
+  const move = session.data.dataContext.move(moveId)
+  if (!move || move.split !== 'STATUS' || !move.effect) return false
+  const probe: BattleSession =
+    slot === 'active'
+      ? session
+      : { ...session, state: stateWithReserve(session.state, 0, session.state.sides[0].party[slot]!, slot) }
+  const deps = aiDamageDepsFor(probe.data, probe.state, probe.inverseBattle)
+  switch (move.effect) {
+    case 'EFFECT_TOXIC':
+    case 'EFFECT_POISON':
+    case 'EFFECT_WILL_O_WISP':
+    case 'EFFECT_PARALYZE':
+    case 'EFFECT_PARALYZE_IGNORE_TYPE':
+    case 'EFFECT_SLEEP':
+      return statusMoveWorks(probe, moveId, move.effect, 1, 0)
+    case 'EFFECT_YAWN':
+      // requirecandoeffect ... MOVE_EFFECT_SLEEP, battle_scripts_1.s:6411-6417.
+      return statusMoveWorks(probe, moveId, 'EFFECT_SLEEP', 1, 0)
+    case 'EFFECT_TOXIC_THREAD':
+      // setmoveeffect MOVE_EFFECT_POISON, battle_scripts_1.s:1727-1728.
+      return statusMoveWorks(probe, moveId, 'EFFECT_POISON', 1, 0)
+    case 'EFFECT_GASTRO_ACID': {
+      // BattleScript_EffectGastroAcid, battle_scripts_1.s:2581-2596: the user's
+      // setgastroacid suppresses our ability BEFORE the poison step, so an
+      // ability immunity cannot protect. An Ability Shield is the one case the
+      // suppression really does not happen (Cmd_setgastroacid); adding the flag
+      // when already suppressed is idempotent.
+      const target = probe.state.battlers[0]
+      if (!target) return false
+      const gateProbe = doesBattlerHaveAbilityShield(target, deps) ? probe : withGastroAcid(probe)
+      return statusMoveWorks(gateProbe, moveId, 'EFFECT_POISON', 1, 0)
+    }
+    case 'EFFECT_SPECTRAL_FLAME': {
+      // BattleScript_EffectSpectralFlame, battle_scripts_1.s:2933-2955: outside
+      // fog it is Will-O-Wisp; in fog the USER's setgastroacid suppresses our
+      // ability before the burn.
+      if (!isBattlerWeatherAffected(probe.state, 1, WEATHER_FOG_ANY, deps)) {
+        return statusMoveWorks(probe, moveId, 'EFFECT_WILL_O_WISP', 1, 0)
+      }
+      const target = probe.state.battlers[0]
+      if (!target) return false
+      const gateProbe = doesBattlerHaveAbilityShield(target, deps) ? probe : withGastroAcid(probe)
+      return statusMoveWorks(gateProbe, moveId, 'EFFECT_WILL_O_WISP', 1, 0)
+    }
+    case 'EFFECT_BLEED':
+      // CanBleed, battle_util.c:5106-5114; BattleScript_EffectBleed :3115-3124.
+      return canBleed(probe.state, 0, 1, deps)
+    case 'EFFECT_FROSTBITE':
+      // CanGetFrostbite, battle_util.c:5096-5104; BattleScript_EffectFrostbite :3127-3137.
+      return canGetFrostbite(probe.state, 0, 1, deps)
+    case 'EFFECT_PSYCHO_SHIFT': {
+      // BattleScript_EffectPsychoShift, battle_scripts_1.s:1461-1465: their mon
+      // must have a status, ours none, and our side no Safeguard. Then
+      // VARIOUS_PSYCHO_SHIFT (battle_script_commands.c:7641-7677) by their
+      // status.
+      const theirs = probe.state.battlers[1]?.mon.status1 ?? 0
+      const ours = probe.state.battlers[0]?.mon.status1 ?? 0
+      if ((theirs & STATUS1_ANY) === 0 || (ours & STATUS1_ANY) !== 0) return false
+      if (hasFlag(probe.state.sides[0].statuses, SIDE_STATUS_SAFEGUARD)) return false
+      if (hasFlag(theirs, STATUS1_PARALYSIS)) return canBeParalyzed(probe.state, 1, 0, deps)
+      // The C really calls CanBeParalyzed for poison and toxic too (:7653), not
+      // a poison predicate; keep it.
+      if (hasFlag(theirs, STATUS1_POISON_ANY)) return canBeParalyzed(probe.state, 1, 0, deps)
+      if (hasFlag(theirs, STATUS1_BURN)) return canBeBurned(probe.state, 0, 1, deps)
+      // Sleep, frostbite and bleed are copied whatever the predicate says (:7671-7679).
+      return true
+    }
+    default:
+      return false
+  }
+}
+
 /** The largest highest-roll their usable moves can land on our active mon
  * (battler 0) or a bench slot, and that mon's current HP. Null when they have
- * no usable move (at least one is required) or the mon is not alive. A null or
+ * no usable move (at least one is required), the mon is not alive, or any usable
+ * move can land a non-volatile status on it (`statusLandsOnUs`). A null or
  * immune range contributes zero. */
 function ppLoopIncoming(
   session: BattleSession,
@@ -775,6 +890,7 @@ function ppLoopIncoming(
   if (hp <= 0) return null
   let highest = 0
   for (const moveId of theirMoves) {
+    if (statusLandsOnUs(session, moveId, slot)) return null
     const range =
       slot === 'active'
         ? aiDamageRolls(
@@ -798,14 +914,15 @@ function takesLittleOrNothing(incoming: PpLoopIncoming | null): incoming is PpLo
  * mon has, so alternate them to drain its PP. Fires only when the ACTIVE mon
  * and at least one bench slot both qualify, and switches to the qualifying slot
  * whose worst-case fraction of HP is smallest (ties go to the lower slot). The
- * stall count (updated on every `policy` call) stops it once both sides have
- * switched for `PP_LOOP_STALL_LIMIT` turns with no HP or PP change. */
+ * stall tracker (updated on every `policy` call) latches `stopped` once both
+ * sides have switched for `PP_LOOP_STALL_LIMIT` turns with no HP or PP change;
+ * the latch survives later turns and only a non-consecutive turn clears it. */
 function rulePpLoop(
   session: BattleSession,
   view: PredictionView,
-  stallCount: number,
+  stopped: boolean,
 ): PlayerChoice | null {
-  if (stallCount >= PP_LOOP_STALL_LIMIT) return null
+  if (stopped) return null
   const theirMoves = theirUsableMoves(session)
   if (theirMoves.length === 0) return null
   if (!takesLittleOrNothing(ppLoopIncoming(session, theirMoves, 'active'))) return null
@@ -900,15 +1017,21 @@ export function createTeamLayer(config: {
   // The PP loop's stall tracker, updated on EVERY policy call before the
   // purpose loop (whichever purpose fires), as decision 14's stop rule needs.
   let ppLoopStallCount = 0
+  // Latched once the stop rule fires: the turn AFTER a stop is never a stalled
+  // double switch (our role rule moves, our PP drops), so without the latch the
+  // count would reset and the loop would fire again -- four swaps, one role
+  // turn, four swaps, forever.
+  let ppLoopStopped = false
   let ppLoopPrevious: PpLoopSnapshot | null = null
 
   const observePpLoopStall = (session: BattleSession, turn: number): void => {
     const current = ppLoopSnapshot(session, turn)
     if (ppLoopPrevious !== null) {
-      // One stalled turn: the next turn in sequence, BOTH actives changed, and
-      // neither side's HP or PP moved. Anything else resets the count to 0 --
-      // including a non-consecutive turn, which is also how a layer reused for
-      // a new game clears its old state.
+      // A non-consecutive turn is the "new game on a reused layer" signal, and
+      // it is the ONLY thing that clears the latch. One stalled turn: the next
+      // turn in sequence, BOTH actives changed, and neither side's HP or PP
+      // moved. Anything else resets the count -- but leaves the latch set.
+      if (turn !== ppLoopPrevious.turn + 1) ppLoopStopped = false
       const stalled =
         turn === ppLoopPrevious.turn + 1 &&
         current.ourPartyIndex !== ppLoopPrevious.ourPartyIndex &&
@@ -918,6 +1041,7 @@ export function createTeamLayer(config: {
         current.ourPp === ppLoopPrevious.ourPp &&
         current.theirPp === ppLoopPrevious.theirPp
       ppLoopStallCount = stalled ? ppLoopStallCount + 1 : 0
+      if (ppLoopStallCount >= PP_LOOP_STALL_LIMIT) ppLoopStopped = true
     }
     ppLoopPrevious = current
   }
@@ -960,7 +1084,7 @@ export function createTeamLayer(config: {
           choice = ruleSupport(session, view, genes, roles)
           break
         case 'ppLoop':
-          choice = rulePpLoop(session, view, ppLoopStallCount)
+          choice = rulePpLoop(session, view, ppLoopStopped)
           break
       }
       if (choice) {

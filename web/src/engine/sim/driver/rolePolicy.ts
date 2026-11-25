@@ -577,14 +577,23 @@ const STATUS_EFFECTS: ReadonlySet<string> = new Set([
   'EFFECT_SLEEP', // BattleScript_EffectSleep, :3103-...
 ])
 
-/** Whether `moveId`'s status effect can land on battler 1, using the same
- * CanBe* helpers the move handlers use (so type immunity -- Fire vs Will-O-Wisp,
- * Poison/Steel vs Toxic -- and an existing status are respected), plus the two
- * gates that run before them: the powder canceller
+/** Whether `moveId`'s status effect can land on the target (battler 0 by
+ * default, the shape every role-call site uses), using the same CanBe* helpers
+ * the move handlers use (so type immunity -- Fire vs Will-O-Wisp, Poison/Steel
+ * vs Toxic -- and an existing status are respected), plus the two gates that
+ * run before them: the powder canceller
  * (CANCELLER_POWDER_MOVE, battle_util.c:3455-3466 -> IsPowderImmune :3190-3197)
- * and, for EFFECT_PARALYZE only, typecalc (battle_scripts_1.s:4366). */
-export function statusMoveWorks(session: BattleSession, moveId: string, effect: string): boolean {
-  if (((session.state.battlers[1]?.mon.status1 ?? 0) & STATUS1_ANY) !== 0) return false
+ * and, for EFFECT_PARALYZE only, typecalc (battle_scripts_1.s:4366). The
+ * attacker/target override lets a caller probe the other direction (the PP
+ * loop checks their battler 1 statusing our battler 0). */
+export function statusMoveWorks(
+  session: BattleSession,
+  moveId: string,
+  effect: string,
+  attackerId = 0,
+  targetId = 1,
+): boolean {
+  if (((session.state.battlers[targetId]?.mon.status1 ?? 0) & STATUS1_ANY) !== 0) return false
   const deps = aiDamageDepsFor(session.data, session.state, session.inverseBattle)
   // CANCELLER_POWDER_MOVE (battle_util.c:3455-3466): a FLAG_POWDER move is
   // cancelled outright when IsPowderImmune (battle_util.c:3190-3197) holds --
@@ -592,15 +601,15 @@ export function statusMoveWorks(session: BattleSession, moveId: string, effect: 
   // entry conditions and isPowderImmune already applies the Mycelium Might
   // bypass, matching attackCanceller.ts:580. Covers Spore, Sleep Powder,
   // Stun Spore and Poison Powder.
-  if (session.data.dataContext.move(moveId)?.flags.powderAffected && isPowderImmune(session.state, 0, 1, deps)) {
+  if (session.data.dataContext.move(moveId)?.flags.powderAffected && isPowderImmune(session.state, attackerId, targetId, deps)) {
     return false
   }
   switch (effect) {
     case 'EFFECT_TOXIC':
     case 'EFFECT_POISON':
-      return canBePoisoned(session.state, 0, 1, moveId, deps)
+      return canBePoisoned(session.state, attackerId, targetId, moveId, deps)
     case 'EFFECT_WILL_O_WISP':
-      return canBeBurned(session.state, 1, 0, deps)
+      return canBeBurned(session.state, targetId, attackerId, deps)
     case 'EFFECT_PARALYZE': {
       // BattleScript_EffectParalyze runs typecalc (:4366) before
       // requirecandoeffect (:4367), so an Electric-type move on a Ground target
@@ -612,18 +621,18 @@ export function statusMoveWorks(session: BattleSession, moveId: string, effect: 
       // (battle_script_commands.c:2506; battle_util.c:5072-5080), which
       // canBeParalyzed ports -- keeping it, not the ignore-type variant, is what
       // stops an Electric target from being reported as paralyzable.
-      const target = session.state.battlers[1]
+      const target = session.state.battlers[targetId]
       const moveType = (session.data.dataContext.move(moveId)?.type ?? 'TYPE_ELECTRIC').replace(/^TYPE_/, '')
       if (moveType === 'ELECTRIC' && (target?.mon.types.includes('GROUND') ?? false)) return false
-      return canBeParalyzed(session.state, 0, 1, deps)
+      return canBeParalyzed(session.state, attackerId, targetId, deps)
     }
     case 'EFFECT_PARALYZE_IGNORE_TYPE':
       // BattleScript_EffectParalyzeIgnoreType (:4346-4360) keeps
       // MOVE_EFFECT_IGNORE_TYPE_IMMUNITIES on setmoveeffect and has no typecalc,
       // so Ground typing does not stop it.
-      return canBeParalyzedIgnoreType(session.state, 0, 1, deps)
+      return canBeParalyzedIgnoreType(session.state, attackerId, targetId, deps)
     case 'EFFECT_SLEEP':
-      return canSleep(session.state, 1, 0, deps)
+      return canSleep(session.state, targetId, attackerId, deps)
     default:
       return false
   }

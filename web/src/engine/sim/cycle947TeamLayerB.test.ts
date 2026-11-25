@@ -447,10 +447,31 @@ describe('cycle 947b - team layer: PP loop', () => {
       tags.push(trace[0]!.tags)
     }
     // Four stalled turns observed by the fifth call: turns 1-4 fire ppLoop,
-    // turn 5 falls through to the role and does not fire it again.
+    // turn 5 falls through to the role and latches the stop.
     expect(tags.slice(0, 4).map((t) => t[0])).toEqual(['team', 'team', 'team', 'team'])
     expect(tags.slice(0, 4).map((t) => t[1])).toEqual(['ppLoop', 'ppLoop', 'ppLoop', 'ppLoop'])
     expect(tags[4]![0]).toBe('attacker')
+
+    // The turn after a stop is never a stalled double switch: our role rule
+    // leaves the party index alone and their PP drains. The stop stays latched,
+    // so turns 5-10 all fall through -- without the latch the count would reset
+    // at turn 6 and ppLoop would fire again.
+    const afterStop: string[][] = []
+    for (let turn = 6; turn <= 10; turn++) {
+      stalled.state.battlers[1]!.mon.pp[0] = stalled.state.battlers[1]!.mon.pp[0]! - 1
+      const trace: PolicyTraceEntry[] = []
+      layer.policy(stalled, turn, trace)
+      afterStop.push(trace[0]!.tags)
+    }
+    expect([tags[4]!, ...afterStop].every((t) => t[0] === 'attacker')).toBe(true)
+    expect([tags[4]!, ...afterStop].some((t) => t[1] === 'ppLoop')).toBe(false)
+
+    // A non-consecutive turn is the new-game signal and the only thing that
+    // clears the latch, so the loop fires again.
+    const restartTrace: PolicyTraceEntry[] = []
+    const restart = layer.policy(stalled, 1, restartTrace)
+    expect(restartTrace[0]!.tags).toEqual(['team', 'ppLoop'])
+    expect(restart!.action.action).toBe('SWITCH')
 
     // Their PP drops between calls: the "no HP or PP change" half of the stop
     // rule never holds, so the loop keeps firing past turn 5.
