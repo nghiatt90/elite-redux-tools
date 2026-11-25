@@ -2138,6 +2138,14 @@ const FIXED_DAMAGE_EFFECTS: ReadonlySet<string> = new Set([
   'EFFECT_FINAL_GAMBIT',
 ])
 
+/** True for the moves `fixedDamageFor` answers: every FIXED_DAMAGE_EFFECTS
+ * member, plus Seismic Toss, which shares EFFECT_SKY_DROP with the ordinary-formula
+ * Sky Drop (`jumpifmove MOVE_SEISMIC_TOSS`, data/battle_scripts_1.s:5822-5827).
+ * The type predicate narrows `moveEffect` for callers that then read it. */
+export function isFixedDamageMove(moveId: string, moveEffect: string | null): moveEffect is string {
+  return moveEffect !== null && (FIXED_DAMAGE_EFFECTS.has(moveEffect) || (moveEffect === 'EFFECT_SKY_DROP' && moveId === 'MOVE_SEISMIC_TOSS'))
+}
+
 /** The subset of FIXED_DAMAGE_EFFECTS whose C script calls
  * AdjustFixedDamageForParentalBond (battle_script_commands.c:10615-10624):
  * Cmd_calculatesetdamage (:10653, LEVEL_DAMAGE / SUPER_FANG / SUPER_FANG_HAZE),
@@ -2160,7 +2168,7 @@ const PARENTAL_BOND_FIXED_DAMAGE_EFFECTS: ReadonlySet<string> = new Set([
  * Cmd_setdamagetohealthdifference (:11857-11864), Cmd_calculatesetdamage (:10626-10659) and DMG_CURR_ATTACKER_HP (:9381).
  * `fail` is the script's jump to BattleScript_ButItFailedAtkStringPpReduce, taken before the accuracy check.
  */
-function fixedDamageFor(state: BattleState, battlerId: number, targetId: number, moveEffect: string): { fail: boolean; damage: number } {
+export function fixedDamageFor(state: BattleState, battlerId: number, targetId: number, moveEffect: string): { fail: boolean; damage: number } {
   const attacker = state.battlers[battlerId]
   const target = state.battlers[targetId]
   if (!attacker || !target) return { fail: true, damage: 0 }
@@ -3708,8 +3716,7 @@ export function executeAction(
         preFail = true
       }
     } else if (
-      moveEffect !== null &&
-      (FIXED_DAMAGE_EFFECTS.has(moveEffect) || (moveEffect === 'EFFECT_SKY_DROP' && currentMove.id === 'MOVE_SEISMIC_TOSS')) &&
+      isFixedDamageMove(currentMove.id, moveEffect) &&
       fixedDamageFor(state, battlerId, currentTargetId, moveEffect).fail
     ) {
       // counterdamagecalculator / mirrorcoatdamagecalculator / metalburstdamagecalculator / setdamagetohealthdifference jump to
@@ -4316,9 +4323,7 @@ export function executeAction(
 
     // Fixed-damage scripts (calculatesetdamage and friends) set gBattleMoveDamage themselves, with no crit and no random roll. The
     // resolver above still ran for the type-immunity answer (0), so the fixed amount only replaces a non-zero result.
-    const isFixedDamage =
-      moveEffect !== null &&
-      (FIXED_DAMAGE_EFFECTS.has(moveEffect) || (moveEffect === 'EFFECT_SKY_DROP' && currentMove.id === 'MOVE_SEISMIC_TOSS'))
+    const isFixedDamage = isFixedDamageMove(currentMove.id, moveEffect)
     if (isFixedDamage && targetDamage !== null && targetDamage > 0) {
       targetDamage = fixedDamageFor(state, battlerId, currentTargetId, moveEffect).damage
       // AdjustFixedDamageForParentalBond, battle_script_commands.c:10615-10624, called from Cmd_calculatesetdamage

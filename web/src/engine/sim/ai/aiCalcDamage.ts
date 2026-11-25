@@ -38,7 +38,7 @@ import { buildBattlerBattleState, buildFieldBattleState, gapsToUnmodelled } from
 import { B_SIDE_OPPONENT } from '../constants'
 import { getBattlerBattleMoveTargetFlags } from '../moveTargetFlags'
 import { getMoveTargetCount } from '../../moveTargetCount'
-import { isBattlerAlive } from '../turn'
+import { fixedDamageFor, isBattlerAlive, isFixedDamageMove } from '../turn'
 import { isSimAbilitySuppressed } from '../statBuffs'
 import type { AbilitySlots } from '../../abilities/dispatch'
 
@@ -536,9 +536,19 @@ export interface AiDamageRolls {
  * scenario `aiCalcDamage` builds (same `attackerActsFirst`/`defenderIsSwitching`
  * values, because those are the only values the AI path has) but with
  * `masked = false`, so `withAiMasking` does not blank the item/moves the AI has
- * not yet observed. Returns `null` when the move id is unknown or its power is 0
- * (the same `if (gBattleMoves[move].power)` gate AI_CalcDamage's own damage call
- * takes, battle_ai_util.c:665).
+ * not yet observed. Returns `null` when the move id is unknown, or when its power
+ * is 0 and its damage is not one `fixedDamageFor` answers (the same
+ * `if (gBattleMoves[move].power)` gate AI_CalcDamage's own damage call takes,
+ * battle_ai_util.c:665).
+ *
+ * Moves whose real damage bypasses the ordinary formula are not reported with
+ * the formula's rolls: `isFixedDamageMove` moves replay `fixedDamageFor`'s fixed
+ * amount (turn.ts, the port of Cmd_calculatesetdamage and friends) in all 16
+ * slots, which also answers their "not modelled" note; EFFECT_BIDE's unported
+ * delayed damage is a flat zero and keeps its note. EFFECT_DRAGON_RAGE /
+ * EFFECT_PSYWAVE are left on the ordinary formula with their note, since no move
+ * in the pinned snapshot uses either and `fixedDamageFor` has no branch for them.
+ * Parental Bond is not applied to the fixed amount here (`totalRolls` is null).
  */
 export function aiDamageRolls(
   state: BattleState,
@@ -548,20 +558,47 @@ export function aiDamageRolls(
   deps: AiDamageDeps,
 ): AiDamageRolls | null {
   const built = buildAiScenario(state, moveId, attackerId, defenderId, deps, false)
-  if (!built || !built.move.power) return null
+  if (!built) return null
+  const effect = built.move.effect
+  const isFixedDamage = isFixedDamageMove(built.move.id, effect)
+  // Metal Burst / Comeuppance declare power 0 but are answered by fixedDamageFor,
+  // so they must pass this gate; every other power-0 move still returns null.
+  if (!built.move.power && !isFixedDamage) return null
   const result = calculateMoveDamage(built.scenario)
-  // Same filter aiGetTypeEffectiveness uses at the end of its body: the
-  // "not modelled" note for a move whose real damage bypasses this formula is
-  // answered elsewhere (or not at all), so it is not reported here.
+  const everyNote = [...built.unmodelled, ...result.unmodelled]
+  if (isFixedDamage) {
+    // fixedDamageFor already returns damage 0 on fail (Counter / Mirror Coat /
+    // Metal Burst with no damage taken this round, Endeavor at target hp <= ours).
+    // An immune target keeps 0 too: in the sim the fixed amount only replaces a
+    // non-zero result (turn.ts's `isFixedDamage && targetDamage > 0` block).
+    const damage = result.isImmune ? 0 : fixedDamageFor(built.maskedState, attackerId, defenderId, effect).damage
+    return {
+      rolls: Array.from({ length: 16 }, () => damage),
+      critRolls: null,
+      totalRolls: null,
+      isImmune: result.isImmune,
+      // This move's script is what fixedDamageFor ports, so its own "not modelled"
+      // note is answered; every other note stays.
+      unmodelled: everyNote.filter((note) => !isUnmodelledBasePowerNote(note, built.move.id, built.move.effect)),
+    }
+  }
+  if (effect === 'EFFECT_BIDE') {
+    // Bide's real damage happens in its delayed release script, which is unported:
+    // a flat zero, and the "EFFECT_BIDE: not modelled" note is kept.
+    return {
+      rolls: Array.from({ length: 16 }, () => 0),
+      critRolls: null,
+      totalRolls: null,
+      isImmune: result.isImmune,
+      unmodelled: everyNote,
+    }
+  }
   return {
     rolls: result.rolls,
     critRolls: result.critRolls,
     totalRolls: result.totalRolls,
     isImmune: result.isImmune,
-    unmodelled: [
-      ...built.unmodelled,
-      ...result.unmodelled.filter((note) => !isUnmodelledBasePowerNote(note, built.move.id, built.move.effect)),
-    ],
+    unmodelled: everyNote,
   }
 }
 
