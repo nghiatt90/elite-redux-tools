@@ -54,7 +54,7 @@ import {
 import { isHealingBlocked } from '../endTurn'
 import { weatherHasEffect } from '../fieldEndTurn'
 import type { BattleState, BattlerState, SimBattleMon, SimPartyMon } from '../state'
-import { battlerHasSimAbility, isBattlerWeatherAffected } from '../statBuffs'
+import { attackerHasMoldBreakerActive, battlerHasSimAbility, isBattlerWeatherAffected } from '../statBuffs'
 import {
   CHECK_SLEEP,
   canBeBurned,
@@ -577,6 +577,47 @@ const STATUS_EFFECTS: ReadonlySet<string> = new Set([
   'EFFECT_SLEEP', // BattleScript_EffectSleep, :3103-...
 ])
 
+/** The target-side gates every status move runs before its own eligibility
+ * check, shared by `statusMoveWorks` and the staller's Leech Seed pick:
+ * - DoesSubstituteBlockMove (battle_script_commands.c:12252-12260): Will-O-Wisp
+ *   and Leech Seed run `jumpifsubstituteblocks` (battle_scripts_1.s:6094, :4584)
+ *   and Toxic / Poison / Paralyze / Sleep hit SetMoveEffect's early return on
+ *   the same predicate (:2388, skipped only for MOVE_EFFECT_AFFECTS_USER).
+ *   `checkSubstitute` is false when the caller's `effect` is merely a downstream
+ *   substitute effect (teamLayer probes Yawn, Toxic Thread, Gastro Acid and
+ *   Spectral Flame as other moves' effects); their own scripts were not
+ *   researched, so their Substitute behaviour stays as it is.
+ * - Magic Bounce (Cmd_attackcanceler, battle_script_commands.c:1153-1173): a
+ *   move carrying FLAG_MAGIC_COAT_AFFECTED is bounced by a target with the
+ *   ability. Flag-driven, so it applies to every call. Per-turn execution flags
+ *   (`usesBouncedMove`, Magic Coat's `bounceMove`) are not modelled at choice
+ *   time. */
+function targetBlocksStatusMove(
+  session: BattleSession,
+  moveId: string,
+  attackerId: number,
+  targetId: number,
+  deps: ReturnType<typeof aiDamageDepsFor>,
+  checkSubstitute: boolean,
+): boolean {
+  if (checkSubstitute && doesSubstituteBlockMove(session.state, attackerId, targetId, moveId, deps)) {
+    return true
+  }
+  if (!session.data.dataContext.move(moveId)?.flags.magicCoatAffected) return false
+  const target = session.state.battlers[targetId]
+  const attacker = session.state.battlers[attackerId]
+  if (!target || !attacker) return false
+  return battlerHasSimAbility(
+    session.state,
+    target,
+    'ABILITY_MAGIC_BOUNCE',
+    true,
+    attackerId,
+    attackerHasMoldBreakerActive(attacker, deps),
+    session.data.dataContext,
+  )
+}
+
 /** Whether `moveId`'s status effect can land on the target (battler 0 by
  * default, the shape every role-call site uses), using the same CanBe* helpers
  * the move handlers use (so type immunity -- Fire vs Will-O-Wisp, Poison/Steel
@@ -595,13 +636,18 @@ export function statusMoveWorks(
 ): boolean {
   if (((session.state.battlers[targetId]?.mon.status1 ?? 0) & STATUS1_ANY) !== 0) return false
   const deps = aiDamageDepsFor(session.data, session.state, session.inverseBattle)
+  const move = session.data.dataContext.move(moveId)
+  // Substitute (only when the caller's `effect` is this move's own) and Magic
+  // Bounce, both from the attackcanceler / jumpifsubstituteblocks stages that
+  // precede the status handlers.
+  if (targetBlocksStatusMove(session, moveId, attackerId, targetId, deps, move?.effect === effect)) return false
   // CANCELLER_POWDER_MOVE (battle_util.c:3455-3466): a FLAG_POWDER move is
   // cancelled outright when IsPowderImmune (battle_util.c:3190-3197) holds --
   // attacker != target and no Mycelium Might on the attacker are the C's own
   // entry conditions and isPowderImmune already applies the Mycelium Might
   // bypass, matching attackCanceller.ts:580. Covers Spore, Sleep Powder,
   // Stun Spore and Poison Powder.
-  if (session.data.dataContext.move(moveId)?.flags.powderAffected && isPowderImmune(session.state, attackerId, targetId, deps)) {
+  if (move?.flags.powderAffected && isPowderImmune(session.state, attackerId, targetId, deps)) {
     return false
   }
   switch (effect) {
@@ -939,6 +985,26 @@ export function pickBenchSlot(session: BattleSession, predictedMoveId: string | 
   return best
 }
 
+/** The first pivot move in `pivotMoves` order that can really switch
+ * (`pivotSwitchWorks`), so a failing first pivot never hides a working second
+ * one. Shared by choosePivot and chooseSupport; null when none qualifies. The
+ * live-bench-slot requirement stays at the call sites, as do Shed Tail's HP and
+ * substitute gates (inside pivotSwitchWorks). */
+function pickPivotMove(
+  session: BattleSession,
+  moves: MoveChoiceInfo[],
+  targetSlot: number | null,
+): MoveChoiceInfo | null {
+  for (const id of pivotMoves(session.data)) {
+    const pivot = moves.find((info) => info.moveId === id)
+    if (!pivot) continue
+    const effect = session.data.dataContext.move(id)?.effect ?? null
+    if (!pivotSwitchWorks(session, pivot, effect, targetSlot)) continue
+    return pivot
+  }
+  return null
+}
+
 /** pivot: on a bad matchup (threatened, or unable to damage the target) use the
  * first pivot move that can really switch -- a HIT_ESCAPE whose damage lands,
  * Shed Tail past its own gates, and any of them with a live bench slot -- into
@@ -965,11 +1031,8 @@ function choosePivot(
     // pivotMoves order.
     const bench = pickBenchSlot(session, view.predictedMoveId)
     if (bench !== null) {
-      for (const id of pivotMoves(session.data)) {
-        const pivot = moves.find((info) => info.moveId === id)
-        if (!pivot) continue
-        const effect = session.data.dataContext.move(id)?.effect ?? null
-        if (!pivotSwitchWorks(session, pivot, effect, targetSlot)) continue
+      const pivot = pickPivotMove(session, moves, targetSlot)
+      if (pivot) {
         // Baton Pass and the escape moves read monToSwitchIntoId (turn.ts:1864);
         // playPolicyBattle writes it from the choice's switchTo before stepTurn.
         return { choice: { ...pivot.choice, switchTo: bench }, tag: 'pivot' }
@@ -1181,8 +1244,17 @@ function chooseStaller(
   //    (moveEffects.ts:3806), so Cloud Nine / Air Lock via grounding is respected.
   const target = session.state.battlers[1]
   if (target) {
+    const deps = aiDamageDepsFor(session.data, session.state, session.inverseBattle)
     const leechSeed = findEffect('EFFECT_LEECH_SEED')
-    if (leechSeed && (target.statuses3 & STATUS3_LEECHSEED) === 0 && !target.mon.types.includes('GRASS')) {
+    if (
+      leechSeed &&
+      (target.statuses3 & STATUS3_LEECHSEED) === 0 &&
+      !target.mon.types.includes('GRASS') &&
+      // jumpifsubstituteblocks (battle_scripts_1.s:4584) and FLAG_MAGIC_COAT_AFFECTED
+      // in moves.json; handleLeechSeed runs the substitute check itself
+      // (moveEffects.ts:2889) and the bounce happens in the attackcanceler.
+      !targetBlocksStatusMove(session, leechSeed.moveId, 0, 1, deps, true)
+    ) {
       return { choice: leechSeed.choice, tag: 'residual' }
     }
     const curse = findEffect('EFFECT_CURSE')
@@ -1342,15 +1414,13 @@ function chooseSupport(
   if (batonSetup) return batonSetup
 
   // 2. Hand off with a pivot move once nothing is left to set. A live bench
-  // slot is required; a HIT_ESCAPE pivot additionally needs its damage to land.
-  const pivotId = pivotMoves(session.data).find((id) => moves.some((info) => info.moveId === id))
-  if (pivotId) {
-    const pivot = moves.find((info) => info.moveId === pivotId)!
-    const bench = pickBenchSlot(session, view.predictedMoveId)
-    const effect = session.data.dataContext.move(pivotId)?.effect ?? null
-    if (bench !== null && pivotSwitchWorks(session, pivot, effect, targetSlot)) {
-      return { choice: { ...pivot.choice, switchTo: bench }, tag: 'pivot' }
-    }
+  // slot is required; a pivot that cannot really switch (HIT_ESCAPE on an
+  // immune target, Shed Tail past its HP / substitute gates) is skipped for the
+  // next one in pivotMoves order instead of hiding it.
+  const bench = pickBenchSlot(session, view.predictedMoveId)
+  if (bench !== null) {
+    const pivot = pickPivotMove(session, moves, targetSlot)
+    if (pivot) return { choice: { ...pivot.choice, switchTo: bench }, tag: 'pivot' }
   }
 
   // 3. Without a usable pivot move: a hard switch when threatened and a
