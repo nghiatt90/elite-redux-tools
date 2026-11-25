@@ -705,6 +705,7 @@ export interface AbilityFlags {
   fortKnox: boolean
   resistsFortKnox: boolean
   magicGuard: boolean
+  magicBounce: boolean
   noRecoil: boolean
   halfRecoil: boolean
   foesMinRoll: boolean

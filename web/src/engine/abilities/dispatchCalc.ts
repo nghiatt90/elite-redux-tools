@@ -487,7 +487,7 @@ export function computeAfterTypeEffectiveness(
  * is never mold-broken even though Heatproof is breakable. */
 export function hasFlag(
   slots: AbilitySlots,
-  flag: 'adaptability' | 'unaware' | 'magicGuard' | 'noRecoil' | 'halfRecoil' | 'skillLink' | 'levitate' | 'auraBreak' | 'noBurnDamage',
+  flag: 'adaptability' | 'unaware' | 'magicGuard' | 'magicBounce' | 'noRecoil' | 'halfRecoil' | 'skillLink' | 'levitate' | 'auraBreak' | 'noBurnDamage',
   moldBroken = false,
 ): boolean {
   let found = false

@@ -244,6 +244,7 @@ import type { MoveBehaviors } from '../basePower'
 import { applySecondaryMoveEffects, canBattlerSwitch, CHLOROPLAST_ABILITIES, consumeBerryWithOverride, forceRandomSwitch, getMoveEffectHandler, SECONDARY_MOVE_EFFECT_MAP } from './moveEffects'
 import {
   attackerHasMoldBreakerActive,
+  battlerHasMagicBounce,
   battlerHasSimAbility,
   B_MSG_DEFENDER_STAT_FELL,
   changeStatBuffs,
@@ -3072,11 +3073,9 @@ export function executeAction(
       const isBouncedByCoat = currentTargetId !== null && Boolean(state.battlers[currentTargetId]?.round.bounceMove)
       const isBouncedByAbility =
         currentTargetId !== null &&
-        battlerHasSimAbility(
+        battlerHasMagicBounce(
           state,
           state.battlers[currentTargetId]!,
-          'ABILITY_MAGIC_BOUNCE',
-          true,
           battlerId,
           attackerHasMoldBreakerActive(attackerBattler, deps),
           deps.dataContext,

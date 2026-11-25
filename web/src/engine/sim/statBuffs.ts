@@ -60,6 +60,7 @@ import {
   MOVE_EFFECT_EVS_MINUS_2,
 } from './constants'
 import { battlerHasAbility } from '../abilities/dispatch'
+import { hasFlag as abilitySlotsHaveFlag } from '../abilities/dispatchCalc'
 import {
   MOVE_EFFECT_CONFUSION,
   MOVE_EFFECT_PARALYSIS,
@@ -176,6 +177,37 @@ export function battlerHasSimAbility(
 ): boolean {
   return battlerHasAbility(battler.mon.abilities, abilityId, (id) =>
     isSimAbilitySuppressed(state, battler, id, checkMoldBreaker, attackerId, attackerHasMoldBreaker, dataContext),
+  )
+}
+
+/**
+ * Does this battler have an unsuppressed ability carrying the `magicBounce`
+ * bitfield? Cmd_attackcanceler runs `ON_ABILITY(gBattlerTarget, TRUE,
+ * gAbilities[ability].magicBounce, ...)` (src/battle_script_commands.c:1168-1172),
+ * and ON_ABILITY walks every slot skipping `IsSuppressed(..., checkMoldBreaker=TRUE)`
+ * ones (include/battle_util.h:269-275) -- so the flag, not the literal
+ * `ABILITY_MAGIC_BOUNCE` id, decides. Conjourer of Deceit is the only other
+ * carrier (src/abilities.cc:9362-9367).
+ */
+export function battlerHasMagicBounce(
+  state: BattleState,
+  battler: BattlerState,
+  attackerId: number,
+  attackerHasMoldBreaker: boolean,
+  dataContext: SimDataContext,
+): boolean {
+  const live = (id: string | null): string | null =>
+    id && !isSimAbilitySuppressed(state, battler, id, true, attackerId, attackerHasMoldBreaker, dataContext) ? id : null
+  return abilitySlotsHaveFlag(
+    {
+      ability: live(battler.mon.abilities.ability),
+      innates: [
+        live(battler.mon.abilities.innates[0]),
+        live(battler.mon.abilities.innates[1]),
+        live(battler.mon.abilities.innates[2]),
+      ],
+    },
+    'magicBounce',
   )
 }
 

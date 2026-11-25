@@ -54,7 +54,7 @@ import {
 import { isHealingBlocked } from '../endTurn'
 import { weatherHasEffect } from '../fieldEndTurn'
 import type { BattleState, BattlerState, SimBattleMon, SimPartyMon } from '../state'
-import { attackerHasMoldBreakerActive, battlerHasSimAbility, isBattlerWeatherAffected } from '../statBuffs'
+import { attackerHasMoldBreakerActive, battlerHasMagicBounce, battlerHasSimAbility, isBattlerWeatherAffected } from '../statBuffs'
 import {
   CHECK_SLEEP,
   canBeBurned,
@@ -594,10 +594,10 @@ const STATUS_EFFECTS: ReadonlySet<string> = new Set([
  *   Spectral Flame as other moves' effects); their own scripts were not
  *   researched, so their Substitute behaviour stays as it is.
  * - Magic Bounce (Cmd_attackcanceler, battle_script_commands.c:1153-1173): a
- *   move carrying FLAG_MAGIC_COAT_AFFECTED is bounced by a target with the
- *   ability. Flag-driven, so it applies to every call. Per-turn execution flags
- *   (`usesBouncedMove`, Magic Coat's `bounceMove`) are not modelled at choice
- *   time. */
+ *   move carrying FLAG_MAGIC_COAT_AFFECTED is bounced by a target whose
+ *   unsuppressed ability carries the `magicBounce` flag. Flag-driven, so it
+ *   applies to every call. Per-turn execution flags (`usesBouncedMove`, Magic
+ *   Coat's `bounceMove`) are not modelled at choice time. */
 function targetBlocksStatusMove(
   session: BattleSession,
   moveId: string,
@@ -619,11 +619,9 @@ function targetBlocksStatusMove(
   const target = session.state.battlers[targetId]
   const attacker = session.state.battlers[attackerId]
   if (!target || !attacker) return false
-  return battlerHasSimAbility(
+  return battlerHasMagicBounce(
     session.state,
     target,
-    'ABILITY_MAGIC_BOUNCE',
-    true,
     attackerId,
     attackerHasMoldBreakerActive(attacker, deps),
     session.data.dataContext,

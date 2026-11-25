@@ -198,7 +198,7 @@ Static detection of bitfield names across production TypeScript source files und
 | `halfRecoil` | Yes | `web/src/engine/abilities/dispatchCalc.ts`, `web/src/engine/abilities/impl/00-flags.ts`, `web/src/engine/abilities/types.ts`, `web/src/engine/sim/ai/aiCheckBadMove.ts`, `web/src/engine/sim/driver/moveInventory.ts`, `web/src/engine/sim/moveEnd.ts`, `web/src/engine/sim/turn.ts` |
 | `isSoundproof` | Yes | `web/src/engine/sim/ai/aiAbilityHelpers.ts`, `web/src/engine/sim/ai/aiCheckBadMove.ts`, `web/src/engine/sim/moveEffects.ts`, `web/src/engine/sim/turn.ts` |
 | `levitate` | Yes | `web/src/engine/abilities/dispatchCalc.ts`, `web/src/engine/abilities/impl/01-offensive-multiplier-a.ts`, `web/src/engine/abilities/impl/06-offensive-multiplier-c.ts`, `web/src/engine/abilities/impl/10-aliases.ts`, `web/src/engine/abilities/impl/12-adds-type.ts`, `web/src/engine/abilities/impl/18-offensive-multiplier-e.ts`, `web/src/engine/abilities/types.ts`, `web/src/engine/calculate.ts`, `web/src/engine/sim/grounding.ts` |
-| `magicBounce` | No | *(not read by sim or engine code)* |
+| `magicBounce` | Yes | `web/src/engine/abilities/dispatchCalc.ts`, `web/src/engine/abilities/impl/00-flags.ts`, `web/src/engine/abilities/types.ts`, `web/src/engine/sim/driver/rolePolicy.ts`, `web/src/engine/sim/statBuffs.ts` |
 | `magicGuard` | Yes | `web/src/engine/abilities/dispatchCalc.ts`, `web/src/engine/abilities/impl/00-flags.ts`, `web/src/engine/abilities/impl/26-immune.ts`, `web/src/engine/abilities/types.ts`, `web/src/engine/sim/driver/expectimax.ts`, `web/src/engine/sim/endTurn.ts` |
 | `megaLauncherBoost` | Yes | `web/src/engine/abilities/types.ts`, `web/src/engine/sim/moveEffects.ts` |
 | `mirrorArmor` | Yes | `web/src/engine/sim/hazards.ts` |
