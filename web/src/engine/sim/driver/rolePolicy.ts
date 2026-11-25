@@ -9,8 +9,8 @@
 // staller and support.
 //
 // Ports of game mechanics cite the C; the policy thresholds (the 50% default
-// safety line, accuracy weighting, the heal threshold, the refresh gene) are
-// MODEL CHOICES and are marked as such.
+// safety line, accuracy weighting, the heal threshold) are MODEL CHOICES and
+// are marked as such.
 
 import { createBattlerState } from '../create'
 import type { AiDamageRolls } from '../ai/aiCalcDamage'
@@ -100,10 +100,6 @@ export interface RoleParams {
   targetStage?: 1 | 2 | 3 | 6
   /** staller: heal below this percentage of max HP. Default 50. */
   healThreshold?: 33 | 50 | 66
-  /** support: re-set an effect on its last turn (timer == 1) when the handler
-   * accepts the re-cast. Default 'no'. MODEL CHOICE; only the screens accept a
-   * re-cast and only through Screen Cleaner (see `recastAccepted`). */
-  refresh?: 'yes' | 'no'
 }
 
 /** Per-battler state the caller owns and persists across turns. `lastMove` is
@@ -793,28 +789,23 @@ function targetHasResidual(session: BattleSession): boolean {
 // Support inputs (decision 14)
 // ---------------------------------------------------------------------------
 
-/** The screens, in the rule's priority order. The side status bit and the
- * side's own countdown live on `state.sides[0]` (constants.ts:279-288,
- * state.ts:509-525). */
+/** The screens, in the rule's priority order. The side status bit lives on
+ * `state.sides[0]` (constants.ts:279-288, state.ts:509-525). */
 const SCREEN_EFFECTS: readonly {
   effect: string
   up: (session: BattleSession) => boolean
-  timer: (session: BattleSession) => number
 }[] = [
   {
     effect: 'EFFECT_REFLECT', // handleReflect, moveEffects.ts:2940-2968
     up: (s) => (s.state.sides[0].statuses & SIDE_STATUS_REFLECT) !== 0,
-    timer: (s) => s.state.sides[0].timers.reflectTimer,
   },
   {
     effect: 'EFFECT_LIGHT_SCREEN', // handleLightScreen, moveEffects.ts:2970-2998
     up: (s) => (s.state.sides[0].statuses & SIDE_STATUS_LIGHTSCREEN) !== 0,
-    timer: (s) => s.state.sides[0].timers.lightscreenTimer,
   },
   {
     effect: 'EFFECT_AURORA_VEIL', // handleAuroraVeil, moveEffects.ts:3000-3028
     up: (s) => (s.state.sides[0].statuses & SIDE_STATUS_AURORA_VEIL) !== 0,
-    timer: (s) => s.state.sides[0].timers.auroraVeilTimer,
   },
 ]
 
@@ -836,15 +827,6 @@ const TERRAIN_EFFECTS: readonly { effect: string; flag: number }[] = [
   { effect: 'EFFECT_PSYCHIC_TERRAIN', flag: STATUS_FIELD_PSYCHIC_TERRAIN }, // handlePsychicTerrain, :3430
   { effect: 'EFFECT_TOXIC_TERRAIN', flag: STATUS_FIELD_TOXIC_TERRAIN }, // handleToxicTerrain, :3434
 ]
-
-/** True when the user's Screen Cleaner lets a screen re-cast succeed
- * (`hasReflect && !hasScreenCleaner`, moveEffects.ts:2952; the same branch in
- * handleLightScreen :2982 and handleAuroraVeil :3014). */
-function hasScreenCleaner(session: BattleSession): boolean {
-  const battler = session.state.battlers[0]
-  if (!battler) return false
-  return battlerHasSimAbility(session.state, battler, 'ABILITY_SCREEN_CLEANER', false, 0, false, session.data.dataContext)
-}
 
 /** handleAuroraVeil's weather gate: it also fails when it is not hailing and
  * the user lacks Aurora Borealis (moveEffects.ts:3014). */
@@ -869,26 +851,6 @@ function auroraVeilWorks(session: BattleSession): boolean {
 function weatherMoveWorks(session: BattleSession): boolean {
   if ((session.state.field.weather & WEATHER_PRIMAL_ANY) !== 0) return false
   return weatherHasEffect(session.state, session.turnDeps.grounding)
-}
-
-/** Whether `effect`'s handler accepts re-setting it while it is still up.
- * Screens do, but only through the Screen Cleaner branch (handleReflect
- * moveEffects.ts:2952, handleLightScreen :2982, handleAuroraVeil :3014); for
- * Aurora Veil the hail / Aurora Borealis condition (:3014) must hold too.
- * Everything else rejects a same-effect re-cast: a weather recast fails in
- * tryChangeBattleWeather (switchInAbility.ts:427, "already active"), a
- * same-terrain recast fails in setFieldTerrain (moveEffects.ts:3404), and a
- * Trick Room recast while up TOGGLES IT OFF (handleRoomMove :3461-3475). */
-function recastAccepted(session: BattleSession, effect: string): boolean {
-  switch (effect) {
-    case 'EFFECT_REFLECT':
-    case 'EFFECT_LIGHT_SCREEN':
-      return hasScreenCleaner(session)
-    case 'EFFECT_AURORA_VEIL':
-      return hasScreenCleaner(session) && auroraVeilWorks(session)
-    default:
-      return false
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1234,22 +1196,15 @@ function chooseStaller(
   return chooseAttacker(session, view, targetSlot, hp)
 }
 
-/** The support's first effect to (re)set, in decision 14's priority order:
- * screens, weather, terrain, Trick Room. Null when every effect is already up
- * (and `refresh` does not re-set it). Timers are decrement-then-test: at
- * decision time T == 1 means the effect expires at this turn's end. */
+/** The support's first effect to set, in decision 14's priority order:
+ * screens, weather, terrain, Trick Room. Null when every effect is already up. */
 function chooseSupportSetter(
   session: BattleSession,
   moves: MoveChoiceInfo[],
   view: PredictionView,
-  refresh: boolean,
 ): RoleDecision | null {
   const findMove = (effect: string): MoveChoiceInfo | undefined =>
     moves.find((info) => info.moveId !== '' && session.data.dataContext.move(info.moveId)?.effect === effect)
-  // Set the effect when it is down; with refresh='yes' also re-set it on its
-  // last turn, but only where the handler really accepts the re-cast.
-  const shouldSet = (up: boolean, timer: number, effect: string): boolean =>
-    !up || (refresh && timer === 1 && recastAccepted(session, effect))
 
   for (const row of SCREEN_EFFECTS) {
     const move = findMove(row.effect)
@@ -1258,7 +1213,7 @@ function chooseSupportSetter(
     // Never pick Aurora Veil when it would fail without hail / Aurora Borealis
     // (moveEffects.ts:3014). The other screens have no such condition.
     if (row.effect === 'EFFECT_AURORA_VEIL' && !auroraVeilWorks(session)) continue
-    if (shouldSet(up, row.timer(session), row.effect)) return { choice: move.choice, tag: up ? 'refresh' : 'screen' }
+    if (!up) return { choice: move.choice, tag: 'screen' }
   }
 
   if (weatherMoveWorks(session)) {
@@ -1266,9 +1221,7 @@ function chooseSupportSetter(
       const move = findMove(row.effect)
       if (!move) continue
       const up = (session.state.field.weather & row.mask) !== 0
-      if (shouldSet(up, session.state.field.weatherDuration, row.effect)) {
-        return { choice: move.choice, tag: up ? 'refresh' : 'weather' }
-      }
+      if (!up) return { choice: move.choice, tag: 'weather' }
     }
   }
 
@@ -1276,9 +1229,7 @@ function chooseSupportSetter(
     const move = findMove(row.effect)
     if (!move) continue
     const up = (session.state.field.statuses & row.flag) !== 0
-    if (shouldSet(up, session.state.field.timers.terrainTimer, row.effect)) {
-      return { choice: move.choice, tag: up ? 'refresh' : 'terrain' }
-    }
+    if (!up) return { choice: move.choice, tag: 'terrain' }
   }
 
   const trickRoom = findMove('EFFECT_TRICK_ROOM')
@@ -1293,10 +1244,7 @@ function chooseSupportSetter(
     const neutral = trickRoom.choice.action.chosenMove
       ? { ...trickRoom.choice.action, chosenMove: { ...trickRoom.choice.action.chosenMove, priority: 0 } }
       : trickRoom.choice.action
-    if (
-      shouldSet(up, session.state.field.timers.trickRoomTimer, 'EFFECT_TRICK_ROOM') &&
-      !outspeeds(session, neutral, view.predictedAction)
-    ) {
+    if (!up && !outspeeds(session, neutral, view.predictedAction)) {
       return { choice: trickRoom.choice, tag: 'trickroom' }
     }
   }
@@ -1310,12 +1258,11 @@ function chooseSupportSetter(
  * "effect is up" logic (teamLayer.ts).
  *
  * Only the screens, weather, terrain and Trick Room count. The Baton Pass
- * own-boost set-up is deliberately excluded (refresh = false, so only the
- * setter rule runs): a freshly switched-in mon always starts at stage 0, so
- * counting its own boosts as a pending effect would pull it in forever.
- * MODEL CHOICE, not a game fact. */
+ * own-boost set-up is deliberately excluded (only the setter rule runs): a
+ * freshly switched-in mon always starts at stage 0, so counting its own boosts
+ * as a pending effect would pull it in forever. MODEL CHOICE, not a game fact. */
 export function supportEffectPending(session: BattleSession, view: PredictionView): boolean {
-  return chooseSupportSetter(session, evaluateMoves(session, null), view, false) !== null
+  return chooseSupportSetter(session, evaluateMoves(session, null), view) !== null
 }
 
 /** Own boosts for Baton Pass: while below the target stage, safe (the
@@ -1364,10 +1311,9 @@ function chooseSupport(
   memory: RoleMemory,
 ): RoleDecision {
   const moves = evaluateMoves(session, targetSlot)
-  const refresh = (params.refresh ?? 'no') === 'yes'
 
-  // 1. Set the effect (or refresh it on its last turn).
-  const setter = chooseSupportSetter(session, moves, view, refresh)
+  // 1. Set the effect.
+  const setter = chooseSupportSetter(session, moves, view)
   if (setter) return setter
   const batonSetup = chooseBatonPassSetup(session, view, moves, params)
   if (batonSetup) return batonSetup

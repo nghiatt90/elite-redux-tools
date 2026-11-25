@@ -9,7 +9,7 @@
 // `stepTurn`, the same shape as cycle946's test. HP / stat stages / field
 // timers are patched on the created session only BEFORE a decision; nothing is
 // poked after `executeTurn`. Every effect gate cites the handler that decides
-// it; the policy thresholds (safetyPct, targetStage, refresh) are MODEL
+// it; the policy thresholds (safetyPct, targetStage) are MODEL
 // CHOICES (decision 14's defaults).
 import { describe, expect, it } from 'vitest'
 
@@ -232,14 +232,15 @@ describe('cycle 947 - support: weather', () => {
     expect(moveId(chooseRoleAction(s, 'support', {}, mem))).toBe('MOVE_BODY_SLAM')
   })
 
-  it('does not re-cast Rain Dance on its last turn even with refresh=yes', () => {
-    // The weather handler rejects a re-cast of the weather already active
-    // (tryChangeBattleWeather, switchInAbility.ts:427), so refresh cannot help.
+  it('does not re-cast Rain Dance on its last turn while still up', () => {
+    // The policy does not re-cast an effect while still up; the weather handler
+    // also rejects a re-cast of the weather already active
+    // (tryChangeBattleWeather, switchInAbility.ts:427).
     const s = session(playerOne(['MOVE_RAIN_DANCE', 'MOVE_BODY_SLAM']), [mon('SPECIES_MACHAMP', ['MOVE_CELEBRATE'])])
     s.state.field.weather = WEATHER_RAIN_TEMPORARY
     s.state.field.weatherDuration = 1
     beginTurn(s)
-    expect(moveId(chooseRoleAction(s, 'support', { refresh: 'yes' }, memory()))).toBe('MOVE_BODY_SLAM')
+    expect(moveId(chooseRoleAction(s, 'support', {}, memory()))).toBe('MOVE_BODY_SLAM')
   })
 })
 
@@ -295,37 +296,16 @@ describe('cycle 947 - support: Trick Room', () => {
   })
 })
 
-describe('cycle 947 - support: refresh', () => {
+describe('cycle 947 - support: no re-cast while up', () => {
   const reflectUp = (s: BattleSession, timer: number): void => {
     s.state.sides[0].statuses |= SIDE_STATUS_REFLECT
     s.state.sides[0].timers.reflectTimer = timer
   }
 
-  it('re-sets Reflect on its last turn with Screen Cleaner and refresh=yes', () => {
-    // Screen Cleaner makes handleReflect accept the re-cast
-    // (moveEffects.ts:2950-2956): the timer is reset to 5.
-    const s = session(
-      [
-        {
-          species: 'SPECIES_SNORLAX',
-          level: 50,
-          ability: 'ABILITY_SCREEN_CLEANER',
-          moves: ['MOVE_REFLECT', 'MOVE_BODY_SLAM'],
-        },
-      ],
-      [mon('SPECIES_MACHAMP', ['MOVE_CELEBRATE'])],
-    )
-    reflectUp(s, 1)
-    const turn = playTurn(s, 'support', { refresh: 'yes' }, memory())
-    expect(moveId(turn)).toBe('MOVE_REFLECT')
-    expect(s.state.sides[0].timers.reflectTimer).toBe(5)
-    expect(s.state.sides[0].statuses & SIDE_STATUS_REFLECT).toBe(SIDE_STATUS_REFLECT)
-  })
-
-  it('with refresh=no leaves the last-turn Reflect to expire', () => {
+  it('leaves the last-turn Reflect to expire', () => {
     const s = session(playerOne(['MOVE_REFLECT', 'MOVE_BODY_SLAM']), [mon('SPECIES_MACHAMP', ['MOVE_CELEBRATE'])])
     reflectUp(s, 1)
-    const turn = playTurn(s, 'support', { refresh: 'no' }, memory())
+    const turn = playTurn(s, 'support', {}, memory())
     expect(moveId(turn)).toBe('MOVE_BODY_SLAM')
     // Timer 1 is the last turn, so ENDTURN_REFLECT decrements it to 0 and
     // clears the bit (fieldEndTurn.ts:504-510, battle_util.c:1793-1810).
@@ -334,12 +314,12 @@ describe('cycle 947 - support: refresh', () => {
   })
 
   it('does not recast Reflect without Screen Cleaner; the handler would miss', () => {
-    // Handle the refresh decision first: no Screen Cleaner means the re-cast is
-    // rejected, so the support must NOT pick Reflect.
+    // An effect is re-set only once it has expired, so the support does not pick
+    // Reflect; without Screen Cleaner the handler would miss anyway.
     const s = session(playerOne(['MOVE_REFLECT', 'MOVE_BODY_SLAM']), [mon('SPECIES_MACHAMP', ['MOVE_CELEBRATE'])])
     reflectUp(s, 1)
     beginTurn(s)
-    expect(moveId(chooseRoleAction(s, 'support', { refresh: 'yes' }, memory()))).toBe('MOVE_BODY_SLAM')
+    expect(moveId(chooseRoleAction(s, 'support', {}, memory()))).toBe('MOVE_BODY_SLAM')
 
     // Then prove the handler's real outcome by forcing the re-cast: it misses
     // and the timer is not reset to 5 (moveEffects.ts:2952-2954).
