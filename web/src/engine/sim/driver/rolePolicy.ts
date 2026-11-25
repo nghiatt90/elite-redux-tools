@@ -433,6 +433,12 @@ function bestByLowestRoll(pool: MoveChoiceInfo[]): MoveChoiceInfo {
  * MOVE_ROAR EFFECT_ROAR, MOVE_DRAGON_TAIL / MOVE_WHIRLWIND / MOVE_CIRCLE_THROW
  * EFFECT_HIT_SWITCH_TARGET.
  *
+ * Roar of Time is not always a phaze: BattleScript_EffectHitSwitchTarget
+ * (battle_scripts_1.s:1669-1671) jumps to BattleScript_EffectHit when the
+ * ATTACKER holds ABILITY_TEMPORAL_RUPTURE, so that use is a plain hit and
+ * `opponentCanUndoBoosts` skips it for such a holder (the sim's own switch
+ * handler does the same, turn.ts:5073-5085).
+ *
  * Super Fang / Ruination run Haze after the hit unless the move had no effect:
  * EFFECT_SUPER_FANG_HAZE (MOVE_NATURES_MADNESS, MOVE_RUINATION),
  * BattleScript_EffectSuperFangHaze (battle_scripts_1.s:4105-4118) -> Cmd_normalisebuffs
@@ -1077,14 +1083,50 @@ function currentBoostStage(session: BattleSession): number {
 
 /** True when any live opponent party mon can undo our stages: a Haze or
  * phazing move, or an Unaware slot. The opposing movesets are visible
- * (SimPartyMon.moves is Slot4<string | null>, state.ts:447). */
+ * (SimPartyMon.moves is Slot4<string | null>, state.ts:447).
+ *
+ * `MOVE_ROAR_OF_TIME` is a plain hit, not a phaze, when its holder has
+ * ABILITY_TEMPORAL_RUPTURE: BattleScript_EffectHitSwitchTarget
+ * (battle_scripts_1.s:1669-1671) is `jumpifnotmove MOVE_ROAR_OF_TIME, ...Continue`
+ * then `jumpifability BS_ATTACKER, ABILITY_TEMPORAL_RUPTURE, BattleScript_EffectHit`,
+ * and the sim's switch handler applies the same test (turn.ts:5073-5085). The
+ * ability check runs against the holder itself (C's actor is BS_ATTACKER), so
+ * Mold Breaker cannot matter and only Neutralizing Gas / Gastro Acid can
+ * suppress it; a reserve battler is rebuilt through `stateWithReserve` so its
+ * live abilities are the ones read. */
 function opponentCanUndoBoosts(session: BattleSession): boolean {
-  for (const mon of session.state.sides[1].party) {
+  const party = session.state.sides[1].party
+  const activePartyIndex = session.state.battlers[1]?.partyIndex ?? -1
+  for (let slot = 0; slot < party.length; slot++) {
+    const mon = party[slot]
     if (!mon || mon.speciesId === null || mon.hp <= 0) continue
     for (const moveId of mon.moves) {
       if (!moveId) continue
       const effect = session.data.dataContext.move(moveId)?.effect
-      if (effect && PHASE_OUT_EFFECTS.has(effect)) return true
+      if (!effect || !PHASE_OUT_EFFECTS.has(effect)) continue
+      if (moveId !== 'MOVE_ROAR_OF_TIME') return true
+      // The mon on the field keeps its live battler state; a reserve is rebuilt
+      // the way a switch-in would (`stateWithReserve`), so its abilities and the
+      // field's suppression flags are the ones the game would see.
+      const battlerState =
+        slot === activePartyIndex && session.state.battlers[1]
+          ? session.state
+          : stateWithReserve(session.state, 1, mon, slot)
+      const battler = battlerState.battlers[1]
+      if (
+        battler === null ||
+        !battlerHasSimAbility(
+          battlerState,
+          battler,
+          'ABILITY_TEMPORAL_RUPTURE',
+          false,
+          battler.id,
+          false,
+          session.data.dataContext,
+        )
+      ) {
+        return true
+      }
     }
     for (const ability of [mon.abilities.ability, ...mon.abilities.innates]) {
       if (ability && UNAWARE_ABILITIES.includes(ability)) return true
