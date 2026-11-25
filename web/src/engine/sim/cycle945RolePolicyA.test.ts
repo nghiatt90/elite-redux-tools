@@ -16,9 +16,10 @@ import { buildPlayerParty } from './driver/buildParty'
 import type { PlayerMonSpec } from './driver/buildParty'
 import type { PlayerChoice } from './driver/expectimax'
 import { loadSimData, type TrainerData, type TrainerMonData } from './driver/loadSimData'
-import { predictAi } from './driver/policyInputs'
+import type { PolicyTraceEntry } from './driver/policyBattle'
+import { ourDamageRange, predictAi } from './driver/policyInputs'
 import type { RoleMemory, RoleParams, RoleName } from './driver/rolePolicy'
-import { chooseRoleAction } from './driver/rolePolicy'
+import { chooseRoleAction, lowestRoll } from './driver/rolePolicy'
 import type { BattleSession } from './driver/session'
 import { beginTurn, createSession, stepTurn } from './driver/session'
 import { createRandomSource } from './rng'
@@ -158,10 +159,36 @@ describe('cycle 945 - attacker: priority when slower and threatened', () => {
 
   it('takes the priority move when threatened and slower', () => {
     const s = setup()
-    // HP 80: the predicted 46 removes more than 50% (40) but does not KO.
+    // HP 80: the predicted 46 removes more than 50% (40) but does not KO. The
+    // Machamp is patched down to 20 HP so BOTH of our moves KO it (Quick Attack
+    // min 30, Body Slam min 63): priority is only the tie-break among KO moves
+    // (docs/battle-sim/solver-v2-plan.md:329), and at speed 1 only Quick Attack
+    // outruns the incoming Body Slam.
+    patchMon(s.state, 0, 0, { hp: 80 })
+    patchMon(s.state, 1, 0, { hp: 20 })
+    const quick = ourDamageRange(s, 'MOVE_QUICK_ATTACK', 0, 1)
+    const slam = ourDamageRange(s, 'MOVE_BODY_SLAM', 0, 1)
+    expect(lowestRoll(quick!)).toBeGreaterThanOrEqual(20)
+    expect(lowestRoll(slam!)).toBeGreaterThanOrEqual(20)
+    beginTurn(s)
+    const trace: PolicyTraceEntry[] = []
+    const choice = chooseRoleAction(s, 'attacker', {}, memory(), trace)
+    expect(moveId(choice)).toBe('MOVE_QUICK_ATTACK')
+    expect(trace[0]!.tags).toEqual(['attacker', 'ko'])
+  })
+
+  it('does not spend the turn on a priority move when neither KOs', () => {
+    const s = setup()
+    // Same position with the Machamp at full HP: neither move is a guaranteed
+    // KO, so no tie-break applies and the accuracy-weighted damage rule picks
+    // Body Slam (mean 69) over Quick Attack (mean 33) even though we are
+    // threatened and slower.
     patchMon(s.state, 0, 0, { hp: 80 })
     beginTurn(s)
-    expect(moveId(chooseRoleAction(s, 'attacker', {}, memory()))).toBe('MOVE_QUICK_ATTACK')
+    const trace: PolicyTraceEntry[] = []
+    const choice = chooseRoleAction(s, 'attacker', {}, memory(), trace)
+    expect(moveId(choice)).toBe('MOVE_BODY_SLAM')
+    expect(trace[0]!.tags).toEqual(['attacker', 'damage'])
   })
 
   it('does not prioritise when not threatened', () => {

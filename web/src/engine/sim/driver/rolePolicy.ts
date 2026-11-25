@@ -33,6 +33,7 @@ import {
   STATUS1_POISON_ANY,
   STATUS2_CURSED,
   STATUS2_NIGHTMARE,
+  STATUS2_SUBSTITUTE,
   STATUS3_LEECHSEED,
   STATUS_FIELD_ELECTRIC_TERRAIN,
   STATUS_FIELD_GRASSY_TERRAIN,
@@ -706,9 +707,9 @@ interface RoleDecision {
   subTag?: string
 }
 
-/** attacker: Fake Out on its first turn in; else a guaranteed KO; else a
- * priority move when slower and threatened; else the best accuracy-weighted
- * damage (decision 14). */
+/** attacker: Fake Out on its first turn in; else a guaranteed KO (a priority KO
+ * first when slower and threatened); else the best accuracy-weighted damage
+ * (decision 14, plan :329). Priority is only a tie-break among KO moves. */
 function chooseAttacker(
   session: BattleSession,
   view: PredictionView,
@@ -734,23 +735,6 @@ function chooseAttacker(
     const faster = kos.filter((info) => outspeeds(session, info.choice.action, view.predictedAction))
     const pool = faster.length > 0 ? faster : kos
     return { choice: bestByLowestRoll(pool).choice, tag: 'ko' }
-  }
-
-  // Priority when we are slower and threatened (decision 14). "Slower" is read
-  // with a neutral-priority move (MODEL CHOICE: priority 0 is the base-speed
-  // comparison the rule refers to); priority then buys the turn.
-  if (view.threatened && view.predictedAction) {
-    const damaging = moves.filter((info) => hasDamage(info.range))
-    const neutral = damaging.filter((info) => info.priority === 0)
-    const reference = neutral.length > 0 ? bestByDamage(neutral) : damaging.length > 0 ? bestByDamage(damaging) : null
-    if (reference && !outspeeds(session, reference.choice.action, view.predictedAction)) {
-      const priority = damaging.filter((info) => info.priority > 0)
-      if (priority.length > 0) {
-        const priorityKos = priority.filter((info) => guaranteedKo(info.range!, hp))
-        const pool = priorityKos.length > 0 ? priorityKos : priority
-        return { choice: bestByDamage(pool).choice, tag: 'priority' }
-      }
-    }
   }
 
   const damaging = moves.filter((info) => hasDamage(info.range))
@@ -787,9 +771,21 @@ export function pickBenchSlot(session: BattleSession, predictedMoveId: string | 
   return best
 }
 
-/** pivot: on a bad matchup (threatened, or unable to damage the target) use a
- * pivot move and switch into the bench mon that takes the predicted move best;
- * else play as attacker (decision 14). */
+/** Shed Tail's own gates beyond the bench test: it fails under an existing
+ * substitute (data/battle_scripts_1.s:5356) and when Cmd_setsubstitute's
+ * `hp <= max(1, maxHP / 2)` check fails (battle_script_commands.c:10535-10555,
+ * ported in moveEffects.ts's handleShedTail). */
+function shedTailWorks(session: BattleSession): boolean {
+  const mon = session.state.battlers[0]?.mon
+  if (!mon) return false
+  return mon.hp > Math.max(1, Math.floor(mon.maxHp / 2)) && (mon.status2 & STATUS2_SUBSTITUTE) === 0
+}
+
+/** pivot: on a bad matchup (threatened, or unable to damage the target) use the
+ * first pivot move that can really switch -- a HIT_ESCAPE whose damage lands,
+ * Shed Tail past its own gates, and any of them with a live bench slot -- into
+ * the bench mon that takes the predicted move best; else play as attacker
+ * (decision 14). */
 function choosePivot(
   session: BattleSession,
   view: PredictionView,
@@ -803,16 +799,24 @@ function choosePivot(
   const threatenedGate = badMatchup !== 'noDamage' && view.threatened
   const noDamageGate = badMatchup !== 'threatened' && !canDamage
   if (threatenedGate || noDamageGate) {
-    const legal = new Set(moves.map((info) => info.moveId))
-    const pivotId = pivotMoves(session.data).find((id) => legal.has(id))
-    if (pivotId) {
-      const pivot = moves.find((info) => info.moveId === pivotId)!
-      const bench = pickBenchSlot(session, view.predictedMoveId)
-      // Baton Pass and the escape moves read monToSwitchIntoId (turn.ts:1864);
-      // playPolicyBattle writes it from the choice's switchTo before stepTurn.
-      return bench === null
-        ? { choice: pivot.choice, tag: 'pivot' }
-        : { choice: { ...pivot.choice, switchTo: bench }, tag: 'pivot' }
+    // Every pivot script ends in a can-switch test: HIT_ESCAPE skips the switch
+    // on jumpifmovehadnoeffect (:2788), BattleScript_DoMoveSwitch's
+    // jumpifcantswitch (:5379) covers the rest, Baton Pass / Teleport fail
+    // outright (:5271), Shed Tail fails on HP or a substitute (:5356-5358).
+    // A failing first pivot must not hide a working second one, so scan in
+    // pivotMoves order.
+    const bench = pickBenchSlot(session, view.predictedMoveId)
+    if (bench !== null) {
+      for (const id of pivotMoves(session.data)) {
+        const pivot = moves.find((info) => info.moveId === id)
+        if (!pivot) continue
+        const effect = session.data.dataContext.move(id)?.effect ?? null
+        if (!pivotSwitchWorks(pivot, effect)) continue
+        if (effect === 'EFFECT_SHED_TAIL' && !shedTailWorks(session)) continue
+        // Baton Pass and the escape moves read monToSwitchIntoId (turn.ts:1864);
+        // playPolicyBattle writes it from the choice's switchTo before stepTurn.
+        return { choice: { ...pivot.choice, switchTo: bench }, tag: 'pivot' }
+      }
     }
   }
   return chooseAttacker(session, view, targetSlot, hp)
@@ -1050,8 +1054,8 @@ function chooseSupportSetter(
     // 3461-3475). Trick Room helps the slower side, so set it only when we are
     // slower. Trick Room is priority -7 in the pinned snapshot (moves.json), so
     // its own action always orders last; compare RAW speed with a
-    // neutral-priority view of the action, the same way chooseAttacker reads
-    // "slower" (rolePolicy.ts:619-623).
+    // neutral-priority view of the action, the same way chooseAttacker's KO
+    // tie-break reads "outspeeds".
     const neutral = trickRoom.choice.action.chosenMove
       ? { ...trickRoom.choice.action, chosenMove: { ...trickRoom.choice.action.chosenMove, priority: 0 } }
       : trickRoom.choice.action
