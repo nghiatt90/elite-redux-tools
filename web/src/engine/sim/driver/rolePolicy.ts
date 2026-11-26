@@ -68,6 +68,7 @@ import {
   isAbilityStatusProtected,
   isBattlerTerrainAffected,
   isPowderImmune,
+  withMyceliumMightMarker,
 } from '../statusEffects'
 import { blocksStatusMove, buildTurnOrderContext, getStatusMoveAbsorbingAbility } from '../turn'
 import type { ChosenAction } from '../turnOrder'
@@ -653,6 +654,7 @@ export function statusMoveWorks(
 ): boolean {
   if (((session.state.battlers[targetId]?.mon.status1 ?? 0) & STATUS1_ANY) !== 0) return false
   const deps = aiDamageDepsFor(session.data, session.state, session.inverseBattle)
+  const probeState = withMyceliumMightMarker(session.state, attackerId, deps)
   const move = session.data.dataContext.move(moveId)
   // Substitute (only when the caller's `effect` is this move's own) and Magic
   // Bounce, both from the attackcanceler / jumpifsubstituteblocks stages that
@@ -664,15 +666,15 @@ export function statusMoveWorks(
   // entry conditions and isPowderImmune already applies the Mycelium Might
   // bypass, matching attackCanceller.ts:580. Covers Spore, Sleep Powder,
   // Stun Spore and Poison Powder.
-  if (move?.flags.powderAffected && isPowderImmune(session.state, attackerId, targetId, deps)) {
+  if (move?.flags.powderAffected && isPowderImmune(probeState, attackerId, targetId, deps)) {
     return false
   }
   switch (effect) {
     case 'EFFECT_TOXIC':
     case 'EFFECT_POISON':
-      return canBePoisoned(session.state, attackerId, targetId, moveId, deps)
+      return canBePoisoned(probeState, attackerId, targetId, moveId, deps)
     case 'EFFECT_WILL_O_WISP':
-      return canBeBurned(session.state, targetId, attackerId, deps)
+      return canBeBurned(probeState, targetId, attackerId, deps)
     case 'EFFECT_PARALYZE': {
       // BattleScript_EffectParalyze runs typecalc (:4366) before
       // requirecandoeffect (:4367), so an Electric-type move on a Ground target
@@ -687,15 +689,15 @@ export function statusMoveWorks(
       const target = session.state.battlers[targetId]
       const moveType = (session.data.dataContext.move(moveId)?.type ?? 'TYPE_ELECTRIC').replace(/^TYPE_/, '')
       if (moveType === 'ELECTRIC' && (target?.mon.types.includes('GROUND') ?? false)) return false
-      return canBeParalyzed(session.state, attackerId, targetId, deps)
+      return canBeParalyzed(probeState, attackerId, targetId, deps)
     }
     case 'EFFECT_PARALYZE_IGNORE_TYPE':
       // BattleScript_EffectParalyzeIgnoreType (:4346-4360) keeps
       // MOVE_EFFECT_IGNORE_TYPE_IMMUNITIES on setmoveeffect and has no typecalc,
       // so Ground typing does not stop it.
-      return canBeParalyzedIgnoreType(session.state, attackerId, targetId, deps)
+      return canBeParalyzedIgnoreType(probeState, attackerId, targetId, deps)
     case 'EFFECT_SLEEP':
-      return canSleep(session.state, targetId, attackerId, deps)
+      return canSleep(probeState, targetId, attackerId, deps)
     default:
       return false
   }

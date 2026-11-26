@@ -458,7 +458,7 @@ export function isPowderImmune(
   targetId: number,
   deps: StatusDeps,
 ): boolean {
-  if (isMyceliumMightActive(state, attackerId, deps)) return false
+  if (state.myceliumMightMarker) return false
 
   const target = state.battlers[targetId]
   if (!target) return false
@@ -489,17 +489,34 @@ export function isPowderImmune(
 
 /**
  * IsMyceliumMightActive, src/battle_main.c:4249.
- * Checks whether the attacker has Mycelium Might active (unsuppressed, mold breaker=false).
+ * battlerId == gBattlerAttacker && (gHitMarker & HITMARKER_MYCELIUM_MIGHT)
  */
 export function isMyceliumMightActive(
   state: BattleState,
   attackerId: number | null | undefined,
-  deps: StatusDeps,
 ): boolean {
-  if (attackerId == null) return false
+  return Boolean(state.myceliumMightMarker && attackerId === state.myceliumMightBattler)
+}
+
+/**
+ * Sets the Mycelium Might hit marker and attacker for out-of-turn probe evaluations,
+ * mirroring AI move evaluation (src/battle_ai_new.c:79-81).
+ * Returns a shallow copy and does not mutate the input state.
+ */
+export function withMyceliumMightMarker(
+  state: BattleState,
+  attackerId: number,
+  deps: StatusDeps,
+): BattleState {
   const attacker = state.battlers[attackerId]
-  if (!attacker) return false
-  return battlerHasSimAbility(state, attacker, 'ABILITY_MYCELIUM_MIGHT', false, attackerId, false, deps.dataContext)
+  const myceliumMightMarker = attacker
+    ? battlerHasSimAbility(state, attacker, 'ABILITY_MYCELIUM_MIGHT', false, attackerId, false, deps.dataContext)
+    : false
+  return {
+    ...state,
+    myceliumMightMarker,
+    myceliumMightBattler: attackerId,
+  }
 }
 
 /**
@@ -1320,7 +1337,7 @@ export function canSleep(
   const battler = state.battlers[battlerId]
   if (!battler) return false
   if (hasFlag(battler.mon.status1, STATUS1_ANY)) return false
-  if (isMyceliumMightActive(state, attackerId, deps)) return true
+  if (state.myceliumMightMarker) return true
   if (isStatusImmune(state, battlerId, CHECK_SLEEP, attackerId, deps)) return false
   if (isBattlerTerrainAffected(state, battlerId, STATUS_FIELD_ELECTRIC_TERRAIN, deps)) return false
   return true
@@ -1340,7 +1357,7 @@ export function canBePoisoned(
   const target = state.battlers[targetId]
   if (!target) return false
   if (hasFlag(target.mon.status1, STATUS1_ANY)) return false
-  if (myceliumMightActive ?? isMyceliumMightActive(state, attackerId, deps)) return true
+  if (myceliumMightActive ?? isMyceliumMightActive(state, attackerId)) return true
   if (isStatusImmune(state, targetId, CHECK_POISON, attackerId, deps)) return false
   if (!canPoisonType(state, attackerId, targetId, move, deps)) return false
   return true
@@ -1358,7 +1375,7 @@ export function canBeBurnedIgnoreTypeImmunity(
   const battler = state.battlers[battlerId]
   if (!battler) return false
   if (hasFlag(battler.mon.status1, STATUS1_ANY)) return false
-  if (isMyceliumMightActive(state, attackerId, deps)) return true
+  if (state.myceliumMightMarker) return true
   if (isStatusImmune(state, battlerId, CHECK_BURN, attackerId, deps)) return false
   return true
 }
@@ -1376,7 +1393,7 @@ export function canBeBurned(
   const battler = state.battlers[battlerId]
   if (!battler) return false
   if (hasFlag(battler.mon.status1, STATUS1_ANY)) return false
-  if (myceliumMightActive ?? isMyceliumMightActive(state, attackerId, deps)) return true
+  if (myceliumMightActive ?? state.myceliumMightMarker) return true
   if (battler.mon.types.includes('FIRE')) return false
   if (isStatusImmune(state, battlerId, CHECK_BURN, attackerId, deps)) return false
   return true
@@ -1394,7 +1411,7 @@ export function canBeParalyzedIgnoreType(
   const target = state.battlers[targetId]
   if (!target) return false
   if (hasFlag(target.mon.status1, STATUS1_ANY)) return false
-  if (isMyceliumMightActive(state, attackerId, deps)) return true
+  if (isMyceliumMightActive(state, attackerId)) return true
   if (isStatusImmune(state, targetId, CHECK_PARALYSIS, attackerId, deps)) return false
   return true
 }
@@ -1411,7 +1428,7 @@ export function canBeParalyzed(
   const target = state.battlers[targetId]
   if (!target) return false
   if (hasFlag(target.mon.status1, STATUS1_ANY)) return false
-  if (isMyceliumMightActive(state, attackerId, deps)) return true
+  if (isMyceliumMightActive(state, attackerId)) return true
   if (isStatusImmune(state, targetId, CHECK_PARALYSIS, attackerId, deps)) return false
   if (!canParalyzeType(state, attackerId, targetId, deps)) return false
   return true
@@ -1442,7 +1459,7 @@ export function canGetFrostbite(
   const battler = state.battlers[battlerId]
   if (!battler) return false
   if (hasFlag(battler.mon.status1, STATUS1_ANY)) return false
-  if (isMyceliumMightActive(state, attackerId, deps)) return true
+  if (state.myceliumMightMarker) return true
   if (!battler.volatiles.iceStatue && battler.mon.types.includes('ICE')) return false
   if (isStatusImmune(state, battlerId, CHECK_FROSTBITE, attackerId, deps)) return false
   return true
@@ -1461,7 +1478,7 @@ export function canBleed(
   const battler = state.battlers[battlerId]
   if (!battler) return false
   if (hasFlag(battler.mon.status1, STATUS1_ANY)) return false
-  if (myceliumMightActive ?? isMyceliumMightActive(state, attackerId, deps)) return true
+  if (myceliumMightActive ?? state.myceliumMightMarker) return true
   if (isStatusImmune(state, battlerId, CHECK_BLEED, attackerId, deps)) return false
   if (battler.mon.types.includes('ROCK') || battler.mon.types.includes('GHOST')) return false
   return true
@@ -1479,7 +1496,7 @@ export function canBeConfused(
   const battler = state.battlers[battlerId]
   if (!battler) return false
   if (hasFlag(battler.mon.status2, STATUS2_CONFUSION)) return false
-  if (isMyceliumMightActive(state, attackerId, deps)) return true
+  if (state.myceliumMightMarker) return true
   if (isAbilityStatusProtected(state, battlerId, CHECK_CONFUSION, attackerId, deps)) return false
   return true
 }
@@ -1496,7 +1513,7 @@ export function canBeDrenched(
   const battler = state.battlers[battlerId]
   if (!battler) return false
   if (battler.volatiles.drenched > 0) return false
-  if (isMyceliumMightActive(state, attackerId, deps)) return true
+  if (state.myceliumMightMarker) return true
   if (battler.mon.types.includes('WATER')) return false
   if (isAbilityStatusProtected(state, battlerId, CHECK_DRENCH, attackerId, deps)) return false
   return true
@@ -1518,7 +1535,7 @@ export function canInfatuate(
   const attacker = state.battlers[attackerId]
   if (!attacker || attacker.mon.hp === 0) return false
 
-  if (isMyceliumMightActive(state, attackerId, deps)) return true
+  if (isMyceliumMightActive(state, attackerId)) return true
   if (isAbilityStatusProtected(state, targetId, CHECK_INFATUATE, attackerId, deps)) return false
   return true
 }

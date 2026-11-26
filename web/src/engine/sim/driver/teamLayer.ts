@@ -49,7 +49,7 @@ import { ON_DEFENDER_ABILITIES, getBattlerAbilitySlotsReverse } from '../moveEnd
 import type { BattleState, BattlerState, SimPartyMon } from '../state'
 import { battlerHasSimAbility, isBattlerWeatherAffected } from '../statBuffs'
 import { applySwitchInAbilities, type BattleStartDeps } from '../switchInAbility'
-import { canBeBurned, canBeParalyzed, canBleed, canGetFrostbite } from '../statusEffects'
+import { canBeBurned, canBeParalyzed, canBleed, canGetFrostbite, withMyceliumMightMarker } from '../statusEffects'
 import { blocksStatusMove, buildTurnOrderContext } from '../turn'
 import { getMoveSpeed, type ChosenAction } from '../turnOrder'
 import type { PlayerChoice } from './expectimax'
@@ -1705,10 +1705,10 @@ function statusLandsOnUs(
     }
     case 'EFFECT_BLEED':
       // CanBleed, battle_util.c:5106-5114; BattleScript_EffectBleed :3115-3124.
-      return canBleed(probe.state, 0, 1, deps)
+      return canBleed(withMyceliumMightMarker(probe.state, 1, deps), 0, 1, deps)
     case 'EFFECT_FROSTBITE':
       // CanGetFrostbite, battle_util.c:5096-5104; BattleScript_EffectFrostbite :3127-3137.
-      return canGetFrostbite(probe.state, 0, 1, deps)
+      return canGetFrostbite(withMyceliumMightMarker(probe.state, 1, deps), 0, 1, deps)
     case 'EFFECT_PSYCHO_SHIFT': {
       // BattleScript_EffectPsychoShift, battle_scripts_1.s:1461-1465: their mon
       // must have a status, ours none, and our side no Safeguard. Then
@@ -1718,11 +1718,12 @@ function statusLandsOnUs(
       const ours = probe.state.battlers[0]?.mon.status1 ?? 0
       if ((theirs & STATUS1_ANY) === 0 || (ours & STATUS1_ANY) !== 0) return false
       if (hasFlag(probe.state.sides[0].statuses, SIDE_STATUS_SAFEGUARD)) return false
-      if (hasFlag(theirs, STATUS1_PARALYSIS)) return canBeParalyzed(probe.state, 1, 0, deps)
+      const markedState = withMyceliumMightMarker(probe.state, 1, deps)
+      if (hasFlag(theirs, STATUS1_PARALYSIS)) return canBeParalyzed(markedState, 1, 0, deps)
       // The C really calls CanBeParalyzed for poison and toxic too (:7653), not
       // a poison predicate; keep it.
-      if (hasFlag(theirs, STATUS1_POISON_ANY)) return canBeParalyzed(probe.state, 1, 0, deps)
-      if (hasFlag(theirs, STATUS1_BURN)) return canBeBurned(probe.state, 0, 1, deps)
+      if (hasFlag(theirs, STATUS1_POISON_ANY)) return canBeParalyzed(markedState, 1, 0, deps)
+      if (hasFlag(theirs, STATUS1_BURN)) return canBeBurned(markedState, 0, 1, deps)
       // Sleep, frostbite and bleed are copied whatever the predicate says (:7671-7679).
       return true
     }

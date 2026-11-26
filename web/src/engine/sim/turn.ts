@@ -2666,6 +2666,7 @@ export function executeAction(
     false,
     deps.dataContext,
   )
+  state.myceliumMightBattler = battlerId
   let targetId = action.target
   // The move this action actually performs. Encore can replace it at this battler's OWN
   // action, so every read of the chosen move below (PP, Follow Me, Torment, the canceller's
@@ -3135,6 +3136,9 @@ export function executeAction(
 
         // setmagiccoattarget BS_ATTACKER (VARIOUS_SET_MAGIC_COAT_TARGET, battle_script_commands.c:6933-6940)
         const bounceAttackerId = currentTargetId!
+        // battle_script_commands.c:6933-6934: gBattlerAttacker = gBattlerTarget;
+        // The marker is NOT cleared or re-set, so the bouncer becomes the marked attacker.
+        state.myceliumMightBattler = bounceAttackerId
         const bounceDefSide = (bounceAttackerId & 1) ^ 1
         const bounceTargetId = isAffectedByFollowMe(state, bounceAttackerId, bounceDefSide, currentMove.id, deps)
           ? state.sides[bounceDefSide].timers.followmeTarget

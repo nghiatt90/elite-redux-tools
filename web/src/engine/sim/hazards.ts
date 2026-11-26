@@ -242,9 +242,8 @@ export function applySwitchInHazards(state: BattleState, battlerId: number, deps
     // The timer clears BEFORE the status check (:8808), so the hazard fades even
     // when the status cannot land.
     side.timers.hotCoals = false
-    // CanBeBurned, battle_util.c:5061-5070. Pass a null attacker so isMyceliumMightActive
-    // does not read entrant's ability; IsMyceliumMightActive(gBattlerAttacker) (battle_main.c:4249)
-    // applies when state.myceliumMightMarker (HITMARKER_MYCELIUM_MIGHT) is set (:255).
+    // CanBeBurned, battle_util.c:5061-5070: reads HITMARKER_MYCELIUM_MIGHT directly (:5063).
+    // Pass state.myceliumMightMarker for the explicit bypass override.
     if (canBeBurned(state, battlerId, null, statusDeps, state.myceliumMightMarker)) {
       // gBattlerAttacker == gActiveBattler here (:5478), so the holder is the
       // opposite battler (:8811-8816). The partner call is doubles only, matching

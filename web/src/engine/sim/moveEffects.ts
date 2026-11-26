@@ -317,7 +317,6 @@ import {
   getMoveEffectChance,
   isAbilityStatusProtected,
   isBattlerTerrainAffected,
-  isMyceliumMightActive,
   isPreventableSecondaryEffect,
   isSoundMove,
   setOnMoveEffectReactionFlags,
@@ -12867,7 +12866,7 @@ export function applySecondaryMoveEffects(
     if (baseEffectNum === MOVE_EFFECT_LEECH_SEED) {
       if (
         !hasFlag(effectBattler.statuses3, STATUS3_LEECHSEED) &&
-        (isMyceliumMightActive(state, attackerId, deps) || effectBattler.mon.types.includes('GRASS'))
+        (state.myceliumMightMarker || effectBattler.mon.types.includes('GRASS'))
       ) {
         effectBattler.statuses3 = setFlag(
           effectBattler.statuses3,
