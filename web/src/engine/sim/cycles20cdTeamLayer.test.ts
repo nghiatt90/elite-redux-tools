@@ -13,7 +13,7 @@ import type { PlayerChoice } from './driver/expectimax'
 import { legalChoices } from './driver/expectimax'
 import { loadSimData, type TrainerData, type TrainerMonData } from './driver/loadSimData'
 import type { PolicyTraceEntry } from './driver/policyBattle'
-import { highestRoll } from './driver/rolePolicy'
+import { highestRoll, rangeOnOurReserve } from './driver/rolePolicy'
 import type { RoleName } from './driver/rolePolicy'
 import { aiDamageDepsFor, beginTurn, createSession, stepTurn } from './driver/session'
 import type { BattleSession } from './driver/session'
@@ -82,6 +82,7 @@ const NO_PURPOSES: Partial<TeamGenes> = {
 }
 const ONLY_SACRIFICE: Partial<TeamGenes> = {
   purposeFlags: { ...NO_PURPOSES.purposeFlags!, sacrifice: true },
+  switchInSafety: 2,
 }
 
 /** A hard switch to `slot`, read the way `switchChoice` reads it. */
@@ -192,21 +193,30 @@ describe('cycle s20cd - team layer role memory', () => {
     expect(traceA[0]!.tags).toEqual(['staller', 'protect'])
     expect(choiceMoveId(callA!)).toBe('MOVE_PROTECT')
 
+    patchMon(s.state, 1, 0, { hp: 150, maxHp: 150 })
     patchMon(s.state, 0, 0, { hp: 20 })
     const deps = aiDamageDepsFor(data, s.state, s.inverseBattle)
     const theirBodySlam = aiDamageRolls(s.state, 'MOVE_BODY_SLAM', 1, 0, deps)!
     const ourBodySlam = aiDamageRolls(s.state, 'MOVE_BODY_SLAM', 0, 1, deps)!
-    // Burned Guts Machamp's Body Slam highest roll 36 >= our 20 HP, so a sample
-    // can KO us; ours is 75 against its 165 HP, so we do not KO it first.
+    const aggronIncoming = rangeOnOurReserve(s, 'MOVE_BODY_SLAM', 1)!
+    // Burned Guts Machamp's Body Slam highest roll 36 >= our 20 HP, so we do not
+    // KO it first. Aggron takes at most 4/145 (2.76%), which under switchInSafety: 2
+    // is unsafe (400 > 290). Its Iron Head worst roll 78 doubled KOs their 150 HP
+    // Machamp (156 >= 150), making it an unsafe good counter.
     expect(highestRoll(theirBodySlam)).toBe(36)
     expect(highestRoll(ourBodySlam)).toBe(75)
-    expect(s.state.battlers[1]!.mon.hp).toBe(165)
+    expect(highestRoll(aggronIncoming)).toBe(4)
+    expect(highestRoll(aggronIncoming) * 100).toBeGreaterThan(2 * 145)
+    expect(s.state.battlers[1]!.mon.hp).toBe(150)
 
     const traceB: PolicyTraceEntry[] = []
     const callB = layer.policy(s, 2, traceB)
     expect(traceB[0]!.tags).toEqual(['team', 'sacrifice'])
     expect(choiceMoveId(callB!)).toBe('MOVE_BODY_SLAM')
 
+    // Remove the good counter by restoring foe HP to 165 (2 * 78 = 156 < 165)
+    // and heal Snorlax back to maxHp.
+    patchMon(s.state, 1, 0, { hp: 165, maxHp: 165 })
     patchMon(s.state, 0, 0, { hp: s.state.battlers[0]!.mon.maxHp })
     const traceC: PolicyTraceEntry[] = []
     const callC = layer.policy(s, 3, traceC)

@@ -53,9 +53,10 @@ import type { PlayerChoice } from './expectimax'
 import { legalChoices } from './expectimax'
 import type { PolicyTraceEntry } from './policyBattle'
 import type { AiPrediction } from './policyInputs'
-import { guaranteedKo, pivotMoves, predictAi } from './policyInputs'
+import { pivotMoves, predictAi } from './policyInputs'
 import type { MoveChoiceInfo, PredictionView, RoleMemory, RoleName, RoleParams } from './rolePolicy'
 import {
+  accuracyWeightedDamage,
   DEFAULT_SAFETY_PCT,
   SAMPLE_COUNT,
   bestByDamage,
@@ -426,6 +427,8 @@ function switchChoice(
 const ENTRY_PROBE_SEED = 0
 // The support probe's own clone seed, for the same reason.
 const SUPPORT_PROBE_SEED = 0
+// The fodder probe's clone seed, for the same reason.
+const FODDER_PROBE_SEED = 0
 // The PP loop's switch-in probe seed: its clone takes hazard damage and Toxic
 // Terrain chip, never the real session or its RNG.
 const PP_LOOP_PROBE_SEED = 0
@@ -621,6 +624,22 @@ export interface StayDecision {
  * The active mon STAYS when some KO move satisfies:
  *   outspeeds(session, thatMove.choice.action, view.predictedAction) OR !view.koThreat
  */
+/** Whether a move qualifies as a KO move under the stay / usefulness test. */
+export function isKoMove(
+  session: BattleSession,
+  info: MoveChoiceInfo,
+  theirHp: number,
+): boolean {
+  if (!info.range || info.range.isImmune) return false
+  const effect = session.data.dataContext.move(info.moveId)?.effect
+  if (effect === 'EFFECT_FAKE_OUT' && !session.state.battlers[0]?.volatiles.isFirstTurn) {
+    return false
+  }
+  const koChance =
+    koProbability(damageDistribution(info.range), theirHp) * (info.accuracy / 100)
+  return koChance >= STAY_KO_CHANCE
+}
+
 export function stayTest(
   session: BattleSession,
   view: PredictionView,
@@ -632,14 +651,7 @@ export function stayTest(
   let hasSurvivingKo = false
 
   for (const info of evaluateMoves(session, null)) {
-    if (!info.range || info.range.isImmune) continue
-    const effect = session.data.dataContext.move(info.moveId)?.effect
-    if (effect === 'EFFECT_FAKE_OUT' && !session.state.battlers[0]?.volatiles.isFirstTurn) {
-      continue
-    }
-    const koChance =
-      koProbability(damageDistribution(info.range), theirHp) * (info.accuracy / 100)
-    if (koChance < STAY_KO_CHANCE) continue
+    if (!isKoMove(session, info, theirHp)) continue
 
     if (outspeeds(session, info.choice.action, view.predictedAction)) {
       hasOutspeedingKo = true
@@ -677,34 +689,200 @@ function rulePreserve(
   return switchChoice(session, slot, view)
 }
 
-/** sacrifice: our active mon is doomed -- some predicted sample move can KO it
- * (`view.koThreat`) and we do not KO them first (no legal damaging move that is
- * both a guaranteed KO and faster than the predicted action) -- AND a
- * `preserve` or set-up teammate needs a safe entry. Then STAY and attack with
- * the most accuracy-weighted damage, or with a status move when nothing does
- * damage, and let the faint hand the replacement a free entry. */
+/** Whether a bench candidate qualifies as a good counter to their active mon. */
+export function isGoodCounter(
+  session: BattleSession,
+  slot: number,
+  score: BenchScore,
+  theirHp: number,
+  predictedAction: ChosenAction | null,
+): boolean {
+  return 2 * score.lowestRoll >= theirHp || benchFastHeavy(session, slot, theirHp, predictedAction)
+}
+
+// s20ic plugs in here: entry abilities that trigger on switch-in rank first as fodder.
+function fodderAbilityTrigger(
+  _session: BattleSession,
+  _slot: number,
+  _view: PredictionView,
+): boolean {
+  return false
+}
+
+/**
+ * MODEL CHOICE: Mon usefulness evaluated for fodder ranking.
+ * Parameter-free and lexicographic, no weights.
+ */
+export interface MonUsefulness {
+  slot: number
+  /** First key: can the mon KO their active mon (>= 50% KO chance) or set a pending effect? */
+  capable: boolean
+  /** Second key: (hp / maxHp) * min(1, bestAccuracyWeightedDamage / theirHp). */
+  damageFraction: number
+}
+
+/**
+ * Evaluates the usefulness of a mon (active or bench) against their active mon.
+ * MODEL CHOICE: pure function evaluating moves, KO potential, and pending support effects.
+ */
+export function monUsefulness(
+  session: BattleSession,
+  slot: number,
+  view: PredictionView,
+): MonUsefulness {
+  const active = session.state.battlers[0]
+  const isActive = active !== null && active !== undefined && active.partyIndex === slot
+
+  let mon: { hp: number; maxHp: number }
+  let probe: BattleSession
+  if (isActive) {
+    mon = active.mon
+    probe = session
+  } else {
+    const reserve = session.state.sides[0].party[slot]
+    if (!reserve || reserve.hp <= 0 || reserve.speciesId === null) {
+      return { slot, capable: false, damageFraction: 0 }
+    }
+    mon = reserve
+    probe = cloneSession(
+      { ...session, state: stateWithReserve(session.state, 0, reserve, slot) },
+      FODDER_PROBE_SEED,
+    )
+  }
+
+  const theirHp = theirActiveHp(probe)
+  const moves = evaluateMoves(probe, null)
+
+  const canKo = moves.some((info) => isKoMove(probe, info, theirHp))
+  const canSetSupport = supportEffectPending(probe, view)
+  const capable = canKo || canSetSupport
+
+  let bestAccuracyWeighted = 0
+  for (const info of moves) {
+    const dmg = accuracyWeightedDamage(info)
+    if (dmg > bestAccuracyWeighted) {
+      bestAccuracyWeighted = dmg
+    }
+  }
+
+  const hpRatio = mon.maxHp > 0 ? mon.hp / mon.maxHp : 0
+  const damageRatio = theirHp > 0 ? Math.min(1, bestAccuracyWeighted / theirHp) : 0
+  const damageFraction = hpRatio * damageRatio
+
+  return { slot, capable, damageFraction }
+}
+
+/**
+ * Checks whether bench mon `a` is strictly less useful than active mon `b`.
+ * The slot number never counts between active and bench.
+ * MODEL CHOICE: first key lower, or equal first key and lower second key.
+ */
+export function isStrictlyLessUseful(a: MonUsefulness, b: MonUsefulness): boolean {
+  if (a.capable !== b.capable) {
+    return !a.capable && b.capable
+  }
+  return a.damageFraction < b.damageFraction
+}
+
+/**
+ * MODEL CHOICE: Comparator for mon usefulness / bench fodder ranking.
+ * Ranks less useful mons first (better fodder); lower slot breaks ties between bench mons.
+ * Returns negative if a ranks before b (a is better fodder / less useful),
+ * positive if b ranks before a, or 0 if identical.
+ */
+export function compareUsefulness(a: MonUsefulness, b: MonUsefulness): number {
+  if (a.capable !== b.capable) {
+    return a.capable ? 1 : -1
+  }
+  if (a.damageFraction !== b.damageFraction) {
+    return a.damageFraction < b.damageFraction ? -1 : 1
+  }
+  if (a.slot !== b.slot) {
+    return a.slot < b.slot ? -1 : 1
+  }
+  return 0
+}
+
+export const compareFodder = compareUsefulness
+
+function rankBenchFodder(
+  session: BattleSession,
+  slots: readonly number[],
+  view: PredictionView,
+): number[] {
+  return slots.slice().sort((slotA, slotB) => {
+    const trigA = fodderAbilityTrigger(session, slotA, view)
+    const trigB = fodderAbilityTrigger(session, slotB, view)
+    if (trigA !== trigB) return trigA ? -1 : 1
+    return compareUsefulness(
+      monUsefulness(session, slotA, view),
+      monUsefulness(session, slotB, view),
+    )
+  })
+}
+
+/** sacrifice: our active mon is not staying under the stay test, their active mon
+ * is alive, at least one living bench slot is a good counter that cannot enter safely,
+ * and no good counter can enter safely. Fodder is chosen to either stay and attack
+ * (default), or switch in a bench fodder mon if the active is needed later (preserve)
+ * or a bench mon is strictly less useful. The faint hands the replacement a free entry.
+ * MODEL CHOICE: fodder is a state, not a role. */
 function ruleSacrifice(
   session: BattleSession,
   view: PredictionView,
   genes: TeamGenes,
-  roles: RoleName[],
 ): PlayerChoice | null {
-  if (!view.koThreat) return null
   const theirHp = theirActiveHp(session)
-  const moves = evaluateMoves(session, null)
-  const weKoFirst = moves.some(
-    (info) =>
-      info.range !== null &&
-      !info.range.isImmune &&
-      guaranteedKo(info.range, theirHp) &&
-      outspeeds(session, info.choice.action, view.predictedAction),
-  )
-  if (weKoFirst) return null
-  const entryNeeded = livingBenchSlots(session).some(
-    (slot) => slot === genes.preserve || roles[slot] === 'setupSweeper',
-  )
-  if (!entryNeeded) return null
+  if (theirHp <= 0) return null
 
+  const predictedMoveIds = view.predictedMoveId ? [view.predictedMoveId] : []
+  const goodUnsafeCounters: BenchScore[] = []
+
+  for (const slot of livingBenchSlots(session)) {
+    const score = scoreBench(session, slot, predictedMoveIds, genes.switchInSafety)
+    if (!score) continue
+    if (isGoodCounter(session, slot, score, theirHp, view.predictedAction)) {
+      const safe = acceptableSwitchIn(session, slot, predictedMoveIds, genes)
+      if (safe !== null) {
+        // A good counter can enter safely: sacrifice does not fire (counter handles it).
+        return null
+      }
+      goodUnsafeCounters.push(score)
+    }
+  }
+
+  if (goodUnsafeCounters.length === 0) return null
+
+  const designatedCounter = pickBestBench(goodUnsafeCounters)!
+
+  const benchFodderPool = livingBenchSlots(session).filter(
+    (slot) => slot !== designatedCounter.slot && (genes.preserve === null || slot !== genes.preserve),
+  )
+
+  const active = session.state.battlers[0]
+  if (!active) return null
+
+  // Exception (a): active mon is needed later (preserve).
+  if (genes.preserve !== null && active.partyIndex === genes.preserve) {
+    if (benchFodderPool.length === 0) return null
+    const ranked = rankBenchFodder(session, benchFodderPool, view)
+    return switchChoice(session, ranked[0]!, view)
+  }
+
+  // Exception (b): some pool mon is strictly less useful than active mon.
+  const activeUsefulness = monUsefulness(session, active.partyIndex, view)
+  const strictlyLessUseful = benchFodderPool.filter((slot) => {
+    const benchU = monUsefulness(session, slot, view)
+    return isStrictlyLessUseful(benchU, activeUsefulness)
+  })
+
+  if (strictlyLessUseful.length > 0) {
+    const ranked = rankBenchFodder(session, strictlyLessUseful, view)
+    return switchChoice(session, ranked[0]!, view)
+  }
+
+  // Default 1: active mon stays and attacks.
+  const moves = evaluateMoves(session, null)
   const damaging = moves.filter((info) => info.range !== null && !info.range.isImmune)
   if (damaging.length > 0) return bestByDamage(damaging).choice
   const status = moves.find(
@@ -772,9 +950,7 @@ function ruleCounter(
   for (const slot of livingBenchSlots(session)) {
     const scored = acceptableSwitchIn(session, slot, [view.predictedMoveId], genes)
     if (!scored) continue
-    const koInTwo = 2 * scored.lowestRoll >= theirHp
-    const fastHeavy = benchFastHeavy(session, slot, theirHp, view.predictedAction)
-    if (!koInTwo && !fastHeavy) continue
+    if (!isGoodCounter(session, slot, scored, theirHp, view.predictedAction)) continue
     candidates.push(scored)
   }
   if (candidates.length === 0) return null
@@ -1271,7 +1447,7 @@ export function createTeamLayer(config: {
             choice = rulePreserve(session, view, genes)
             break
           case 'sacrifice':
-            choice = ruleSacrifice(session, view, genes, roles)
+            choice = ruleSacrifice(session, view, genes)
             break
           case 'counter':
             choice = ruleCounter(session, view, genes)

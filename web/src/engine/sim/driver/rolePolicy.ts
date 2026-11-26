@@ -398,7 +398,7 @@ export function evaluateMoves(session: BattleSession, targetSlot: number | null)
 }
 
 /** mean damage x accuracy/100 (MODEL CHOICE: the attacker's fallback ranking). */
-function accuracyWeightedDamage(info: MoveChoiceInfo): number {
+export function accuracyWeightedDamage(info: MoveChoiceInfo): number {
   if (!info.range || info.range.isImmune) return 0
   return meanRoll(info.range) * (info.accuracy / 100)
 }

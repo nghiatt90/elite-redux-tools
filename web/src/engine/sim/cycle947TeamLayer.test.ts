@@ -478,10 +478,17 @@ describe('cycle 947 - team layer: counter', () => {
   })
 
   it('does not fire when switchInSafety is below the predicted damage', () => {
-    // 3 * 145 = 435 < 500, so the same switch is refused and the active mon's
+    // 3 * 145 = 435 < 500, so the counter switch is refused and the active mon's
     // own role decides (attacker -> Body Slam; no KO, so the damage fallback).
+    // sacrifice is disabled so the counter-specific refusal is what decides.
     const s = counterSession()
-    const layer = createTeamLayer({ roles: ['attacker', 'setupSweeper'], genes: { switchInSafety: 3 } })
+    const layer = createTeamLayer({
+      roles: ['attacker', 'setupSweeper'],
+      genes: {
+        switchInSafety: 3,
+        purposeFlags: { ...DEFAULT_TEAM_GENES.purposeFlags, sacrifice: false },
+      },
+    })
     const trace: PolicyTraceEntry[] = []
     const choice = layer.policy(s, 1, trace)
     expect(trace[0]!.tags).toEqual(['attacker', 'damage'])
@@ -491,7 +498,7 @@ describe('cycle 947 - team layer: counter', () => {
 
 describe('cycle 947 - team layer: sacrifice', () => {
   it('keeps the doomed mon in and the replacement then enters', () => {
-    const layer = createTeamLayer({ roles: ['attacker', 'setupSweeper'] })
+    const layer = createTeamLayer({ roles: ['attacker', 'setupSweeper'], genes: { switchInSafety: 3 } })
     const s = session(
       [{ species: 'SPECIES_SNORLAX', level: 50, moves: ['MOVE_BODY_SLAM'] }, OUR_AGGRON],
       [mon('SPECIES_MACHAMP', MACHAMP_BODY_SLAM)],
@@ -499,8 +506,9 @@ describe('cycle 947 - team layer: sacrifice', () => {
       1,
       layer.replacement,
     )
-    // 20 HP: Machamp's Body Slam highest roll 46 >= 20, so a sample can KO us
-    // (koThreat) while our own worst roll 63 does not finish its 165 HP.
+    // Aggron is an unsafe good counter: foe HP 150 (2 * 78 = 156 >= 150) and
+    // switchInSafety: 3 (500 > 435). Snorlax at 20 HP cannot KO them first.
+    patchMon(s.state, 1, 0, { hp: 150, maxHp: 150 })
     patchMon(s.state, 0, 0, { hp: 20 })
 
     const trace: PolicyTraceEntry[] = []
@@ -521,9 +529,10 @@ describe('cycle 947 - team layer: sacrifice', () => {
     expect(s.state.battlers[0]!.mon.hp).toBe(s.state.battlers[0]!.mon.maxHp)
   })
 
-  it('does not fire without a preserve or set-up teammate waiting', () => {
-    // The same doomed position, but the bench Aggron is a plain attacker: the
-    // sacrifice rule has no one to hand a free entry to and the role decides.
+  it('does not fire when there is no good counter on the bench', () => {
+    // The same doomed position (Machamp HP 165): Aggron's worst roll doubled is
+    // 156 < 165 and it does not outspeed, so it is not a good counter; sacrifice
+    // has no counter to hand entry to and the role decides.
     const layer = createTeamLayer({ roles: ['attacker', 'attacker'] })
     const s = session(
       [{ species: 'SPECIES_SNORLAX', level: 50, moves: ['MOVE_BODY_SLAM'] }, OUR_AGGRON],
