@@ -31,6 +31,7 @@ import {
 import { beginTurn, createSession, stepTurn } from './driver/session'
 import type { BattleSession, StepResult } from './driver/session'
 import { DEFAULT_TEAM_GENES, createTeamLayer } from './driver/teamLayer'
+import type { TeamGenes } from './driver/teamLayer'
 import { createRandomSource } from './rng'
 import type { BattleState } from './state'
 
