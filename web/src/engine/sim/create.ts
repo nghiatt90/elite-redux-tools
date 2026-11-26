@@ -521,6 +521,7 @@ export function createBattleState(options: CreateBattleStateOptions): BattleStat
     queuedExtraAttacks: [],
     queuedSwitches: [],
     processingExtraAttacks: false,
+    myceliumMightMarker: false,
     currentExtraAttack: null,
     mega: createMegaEvolutionState(),
     singleUseAbility: Array.from({ length: PARTY_SIZE }, () =>

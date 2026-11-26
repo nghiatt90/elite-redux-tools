@@ -763,6 +763,9 @@ export interface BattleState {
   queuedSwitches: QueuedSwitchAction[]
   /** `bool8 gProcessingExtraAttacks` (battle_main.c:177). */
   processingExtraAttacks: boolean
+  /** `gHitMarker & HITMARKER_MYCELIUM_MIGHT` (battle_main.c:4249, battle_util.c:255, :727-731).
+   * Set when a battler with ABILITY_MYCELIUM_MIGHT uses any move; cleared by ClearMiscTurnFlags. */
+  myceliumMightMarker: boolean
   /** Currently executing extra attack, mirroring `gQueuedExtraAttackData[0]` (include/battle.h:1023, battle_main.c:4242). */
   currentExtraAttack: ExtraAttackAction | null
   /** `struct MegaEvolutionData mega` (include/battle.h:694, :549-564). */

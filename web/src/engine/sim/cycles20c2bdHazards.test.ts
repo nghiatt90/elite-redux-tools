@@ -383,8 +383,8 @@ describe('s20c2bd - Hot Coals and Caltrops on switch-in', () => {
   })
 
   it('a Fire-type Mycelium Might mon is not burned', () => {
-    // IsMyceliumMightActive reads the HITMARKER (battle_main.c:4249), which is not
-    // set on switch-in, so the Fire immunity still wins.
+    // IsMyceliumMightActive reads the HITMARKER (battle_main.c:4249), which is false
+    // in that direct call (the entrant's own ability does not set it), so the Fire immunity still wins.
     const { battler, state } = apply({ types: ['FIRE', 'MYSTERY', 'MYSTERY'], ...withAbility(MYCELIUM_MIGHT) }, { hotCoals: true })
     expect(battler.mon.status1).toBe(STATUS1_NONE)
     expect(state.sides[0].timers.hotCoals).toBe(false)

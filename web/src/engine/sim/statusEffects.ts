@@ -1335,11 +1335,12 @@ export function canBePoisoned(
   targetId: number,
   move: string | null | undefined,
   deps: StatusDeps,
+  myceliumMightActive?: boolean,
 ): boolean {
   const target = state.battlers[targetId]
   if (!target) return false
   if (hasFlag(target.mon.status1, STATUS1_ANY)) return false
-  if (isMyceliumMightActive(state, attackerId, deps)) return true
+  if (myceliumMightActive ?? isMyceliumMightActive(state, attackerId, deps)) return true
   if (isStatusImmune(state, targetId, CHECK_POISON, attackerId, deps)) return false
   if (!canPoisonType(state, attackerId, targetId, move, deps)) return false
   return true
@@ -1370,11 +1371,12 @@ export function canBeBurned(
   battlerId: number,
   attackerId: number | null | undefined,
   deps: StatusDeps,
+  myceliumMightActive?: boolean,
 ): boolean {
   const battler = state.battlers[battlerId]
   if (!battler) return false
   if (hasFlag(battler.mon.status1, STATUS1_ANY)) return false
-  if (isMyceliumMightActive(state, attackerId, deps)) return true
+  if (myceliumMightActive ?? isMyceliumMightActive(state, attackerId, deps)) return true
   if (battler.mon.types.includes('FIRE')) return false
   if (isStatusImmune(state, battlerId, CHECK_BURN, attackerId, deps)) return false
   return true
@@ -1454,11 +1456,12 @@ export function canBleed(
   battlerId: number,
   attackerId: number | null | undefined,
   deps: StatusDeps,
+  myceliumMightActive?: boolean,
 ): boolean {
   const battler = state.battlers[battlerId]
   if (!battler) return false
   if (hasFlag(battler.mon.status1, STATUS1_ANY)) return false
-  if (isMyceliumMightActive(state, attackerId, deps)) return true
+  if (myceliumMightActive ?? isMyceliumMightActive(state, attackerId, deps)) return true
   if (isStatusImmune(state, battlerId, CHECK_BLEED, attackerId, deps)) return false
   if (battler.mon.types.includes('ROCK') || battler.mon.types.includes('GHOST')) return false
   return true

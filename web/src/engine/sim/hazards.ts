@@ -12,7 +12,7 @@
 // (abilities, items) only runs for a mon still alive -- switchIn.ts runs it
 // after this function and skips it when the mon fainted.
 //
-// During this whole sequence gBattlerAttacker == gActiveBattler (:5497), which is
+// During this whole sequence gBattlerAttacker == gActiveBattler (:5478), which is
 // why Heavy-Duty Boots, Tectonize and Shield Dust are tested on the switching
 // mon itself and why grounding is evaluated with no Mold Breaker attacker.
 //
@@ -199,7 +199,11 @@ export function applySwitchInHazards(state: BattleState, battlerId: number, deps
     if (battler.mon.types.includes('POISON') || battlerHasSimAbility(state, battler, 'ABILITY_IMMUNITY', true, battlerId, false, deps.dataContext)) {
       side.statuses = clearFlag(side.statuses, SIDE_STATUS_TOXIC_SPIKES)
       side.timers.toxicSpikesAmount = 0
-    } else if (isBattlerAffectedByHazards(state, battlerId, false, false, deps) && canBePoisoned(state, opposite, battlerId, null, { dataContext: deps.dataContext, grounding })) {
+    // CanBePoisoned(opposite, battlerId, MOVE_NONE) (battle_script_commands.c:8763). In C,
+    // IsMyceliumMightActive(opposite) requires opposite == gBattlerAttacker (battle_main.c:4249),
+    // but during switch-in effects gBattlerAttacker is always the switching mon (:5478), so the
+    // bypass never applies; pass false for myceliumMightActive.
+    } else if (isBattlerAffectedByHazards(state, battlerId, false, false, deps) && canBePoisoned(state, opposite, battlerId, null, { dataContext: deps.dataContext, grounding }, false)) {
       battler.mon.status1 |= side.timers.toxicSpikesAmount >= 2 ? STATUS1_TOXIC_POISON : STATUS1_POISON
       const foe = state.battlers[opposite]
       if (foe && (SET_STATE_ON_EFFECT_MAP[MOVE_EFFECT_POISON] ?? []).some((id) => battlerHasSimAbility(state, foe, id, false, opposite, false, deps.dataContext))) {
@@ -238,14 +242,11 @@ export function applySwitchInHazards(state: BattleState, battlerId: number, deps
     // The timer clears BEFORE the status check (:8808), so the hazard fades even
     // when the status cannot land.
     side.timers.hotCoals = false
-    // CanBeBurned, battle_util.c:5061-5070. Pass a null attacker: the C's own
-    // IsMyceliumMightActive(gBattlerAttacker) reads battle_main.c:4249 (the
-    // HITMARKER_MYCELIUM_MIGHT hit marker), which is not set while a mon merely
-    // switches in. Passing the switching mon's id would let the sim's
-    // ability-only isMyceliumMightActive bypass its own Fire-type immunity, which
-    // the C does not do; with attacker == self, mold breaker never applies either.
-    if (canBeBurned(state, battlerId, null, statusDeps)) {
-      // gBattlerAttacker == gActiveBattler here (:5497), so the holder is the
+    // CanBeBurned, battle_util.c:5061-5070. Pass a null attacker so isMyceliumMightActive
+    // does not read entrant's ability; IsMyceliumMightActive(gBattlerAttacker) (battle_main.c:4249)
+    // applies when state.myceliumMightMarker (HITMARKER_MYCELIUM_MIGHT) is set (:255).
+    if (canBeBurned(state, battlerId, null, statusDeps, state.myceliumMightMarker)) {
+      // gBattlerAttacker == gActiveBattler here (:5478), so the holder is the
       // opposite battler (:8811-8816). The partner call is doubles only, matching
       // how the Toxic Spikes block above handles `opposite`.
       setOnMoveEffectReactionFlags(state, opposite, battlerId, MOVE_EFFECT_BURN, statusDeps)
@@ -260,8 +261,8 @@ export function applySwitchInHazards(state: BattleState, battlerId: number, deps
     const statusDeps = { dataContext: deps.dataContext, grounding }
     // The timer clears BEFORE the status check (:8829).
     side.timers.caltrops = false
-    // CanBleed, battle_util.c:5106-5114. Same null attacker as Hot Coals above.
-    if (canBleed(state, battlerId, null, statusDeps)) {
+    // CanBleed, battle_util.c:5106-5114. Same null attacker and myceliumMightMarker as Hot Coals above.
+    if (canBleed(state, battlerId, null, statusDeps, state.myceliumMightMarker)) {
       battler.mon.status1 |= STATUS1_BLEED
     }
   }

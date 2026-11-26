@@ -2565,6 +2565,9 @@ export function executeAction(
    * (data/battle_scripts_1.s:7197-7209, src/battle_script_commands.c:11295-11307). */
   pursuit?: PursuitSwitchHit[] | null,
 ): ActionOutcome {
+  // ClearMiscTurnFlags (battle_util.c:727-731, :759, :779, :844, :859).
+  state.myceliumMightMarker = false
+
   // HandleAction_UseMove:181-186 -- a battler that fainted earlier this turn
   // does not act. Its slot is still consumed; the action is simply finished.
   const blank: ActionOutcome = {
@@ -2653,6 +2656,16 @@ export function executeAction(
   }
 
   const attackerBattler = state.battlers[battlerId]!
+  // HandleAction_UseMove:255: if (BattlerHasAbility(gBattlerAttacker, ABILITY_MYCELIUM_MIGHT, FALSE)) gHitMarker |= HITMARKER_MYCELIUM_MIGHT
+  state.myceliumMightMarker = battlerHasSimAbility(
+    state,
+    attackerBattler,
+    'ABILITY_MYCELIUM_MIGHT',
+    false,
+    battlerId,
+    false,
+    deps.dataContext,
+  )
   let targetId = action.target
   // The move this action actually performs. Encore can replace it at this battler's OWN
   // action, so every read of the chosen move below (PP, Follow Me, Torment, the canceller's
@@ -5867,6 +5880,8 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
     drainQueuedSwitches(state, deps, switchUnmodelled, { index, order, outcomes })
   }
   turnStructsClear(state)
+  // ClearMiscTurnFlags (battle_util.c:859).
+  state.myceliumMightMarker = false
   const lastActor = order.battlerByTurnOrder[order.battlerByTurnOrder.length - 1]
   if (lastActor !== undefined) {
     resetPendingSwitch(state, lastActor)
@@ -6009,6 +6024,8 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
 
   // TurnValuesCleanUp(FALSE), battle_main.c:3492: ZERO(gRoundStructs[i])
   roundStructsClear(state)
+  // ClearMiscTurnFlags (battle_main.c:3491).
+  state.myceliumMightMarker = false
 
   // HandleEndTurn_ContinueBattle, battle_main.c:3446-3447: gQueuedAttackCount = 0; gQueuedSwitchCount = 0;
   state.queuedExtraAttacks = []
