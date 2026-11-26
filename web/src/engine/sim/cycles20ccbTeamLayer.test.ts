@@ -112,7 +112,7 @@ describe('cycle cycles20ccb - counter: bench fast-heavy uses move priority', () 
     const activeIncoming = rangeOnOurReserve(s, 'MOVE_BODY_SLAM', 0)!
     expect(highestRoll(activeIncoming) * 100).toBeGreaterThan(50 * s.state.battlers[0]!.mon.hp)
 
-    const layer = createTeamLayer({ roles: ['attacker', 'attacker'] })
+    const layer = createTeamLayer({ roles: ['attacker', 'attacker'], genes: { switchInSafety: 50 } })
     const trace: PolicyTraceEntry[] = []
     const choice = layer.policy(s, 1, trace)
     expect(trace[0]!.tags).toEqual(['team', 'counter'])
@@ -165,7 +165,7 @@ describe('cycle cycles20ccb - counter: bench fast-heavy uses move priority', () 
     const activeIncoming = rangeOnOurReserve(s, 'MOVE_BODY_SLAM', 0)!
     expect(highestRoll(activeIncoming) * 100).toBeGreaterThan(50 * s.state.battlers[0]!.mon.hp)
 
-    const layer = createTeamLayer({ roles: ['attacker', 'attacker'] })
+    const layer = createTeamLayer({ roles: ['attacker', 'attacker'], genes: { switchInSafety: 50 } })
     const trace: PolicyTraceEntry[] = []
     layer.policy(s, 1, trace)
     expect(trace[0]!.tags).not.toEqual(['team', 'counter'])
@@ -228,7 +228,7 @@ describe('cycle cycles20ccb - counter: bench fast-heavy uses move priority', () 
     const activeIncoming = rangeOnOurReserve(s, 'MOVE_BODY_SLAM', 0)!
     expect(highestRoll(activeIncoming) * 100).toBeGreaterThan(50 * s.state.battlers[0]!.mon.hp)
 
-    const layer = createTeamLayer({ roles: ['attacker', 'attacker'] })
+    const layer = createTeamLayer({ roles: ['attacker', 'attacker'], genes: { switchInSafety: 50 } })
     const trace: PolicyTraceEntry[] = []
     layer.policy(s, 1, trace)
     expect(trace[0]!.tags).not.toEqual(['team', 'counter'])
@@ -284,7 +284,7 @@ describe('cycle cycles20ccb - counter: bench fast-heavy uses move priority', () 
     const activeIncoming = rangeOnOurReserve(s, 'MOVE_MACH_PUNCH', 0)!
     expect(highestRoll(activeIncoming) * 100).toBeGreaterThan(50 * s.state.battlers[0]!.mon.hp)
 
-    const layer = createTeamLayer({ roles: ['attacker', 'attacker'] })
+    const layer = createTeamLayer({ roles: ['attacker', 'attacker'], genes: { switchInSafety: 50 } })
     const trace: PolicyTraceEntry[] = []
     layer.policy(s, 1, trace)
     expect(trace[0]!.tags).not.toEqual(['team', 'counter'])
@@ -336,7 +336,7 @@ describe('cycle cycles20ccb - counter: bench fast-heavy uses move priority', () 
     const activeIncoming = rangeOnOurReserve(s, 'MOVE_ROCK_SLIDE', 0)!
     expect(highestRoll(activeIncoming) * 100).toBeGreaterThan(50 * s.state.battlers[0]!.mon.hp)
 
-    const layer = createTeamLayer({ roles: ['attacker', 'attacker'] })
+    const layer = createTeamLayer({ roles: ['attacker', 'attacker'], genes: { switchInSafety: 50 } })
     const trace: PolicyTraceEntry[] = []
     const choice = layer.policy(s, 1, trace)
     expect(trace[0]!.tags).toEqual(['team', 'counter'])

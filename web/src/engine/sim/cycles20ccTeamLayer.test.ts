@@ -119,7 +119,7 @@ describe('cycle s20cc - counter: the active mon decides over every move', () => 
     expect(lowestRoll(ironHead)).toBe(78)
     expect(2 * lowestRoll(ironHead)).toBeGreaterThanOrEqual(theirHp)
 
-    const layer = createTeamLayer({ roles: ['attacker', 'attacker'] })
+    const layer = createTeamLayer({ roles: ['attacker', 'attacker'], genes: { switchInSafety: 50 } })
     const trace: PolicyTraceEntry[] = []
     const choice = layer.policy(s, 1, trace)
     expect(trace[0]!.tags).not.toEqual(['team', 'counter'])
@@ -144,7 +144,7 @@ describe('cycle s20cc - counter: the active mon decides over every move', () => 
     patchMon(s.state, 0, 0, { hp: 80 })
     patchMon(s.state, 1, 0, { hp: theirHp })
 
-    const layer = createTeamLayer({ roles: ['attacker', 'attacker'] })
+    const layer = createTeamLayer({ roles: ['attacker', 'attacker'], genes: { switchInSafety: 50 } })
     const trace: PolicyTraceEntry[] = []
     const choice = layer.policy(s, 1, trace)
     expect(trace[0]!.tags).toEqual(['team', 'counter'])
@@ -159,7 +159,7 @@ describe('cycle s20cc - counter: the active mon decides over every move', () => 
     )
     patchMon(s.state, 0, 0, { hp: 80 })
     patchMon(s.state, 1, 0, { hp: 128 })
-    const layer = createTeamLayer({ roles: ['attacker', 'attacker'] })
+    const layer = createTeamLayer({ roles: ['attacker', 'attacker'], genes: { switchInSafety: 50 } })
     const trace: PolicyTraceEntry[] = []
     const choice = layer.policy(s, 1, trace)
     expect(trace[0]!.tags).toEqual(['team', 'counter'])
@@ -216,7 +216,7 @@ describe('cycle s20cc - counter: a higher-mean move makes the active mon a threa
     expect(lowestRoll(closeCombat)).toBe(103)
     expect(2 * lowestRoll(closeCombat)).toBeGreaterThanOrEqual(theirHp)
 
-    const layer = createTeamLayer({ roles: ['attacker', 'attacker'] })
+    const layer = createTeamLayer({ roles: ['attacker', 'attacker'], genes: { switchInSafety: 50 } })
     const trace: PolicyTraceEntry[] = []
     const choice = layer.policy(s, 1, trace)
     expect(trace[0]!.tags).not.toEqual(['team', 'counter'])
@@ -235,7 +235,7 @@ describe('cycle s20cc - counter: a higher-mean move makes the active mon a threa
       [THEIR_MACHAMP()],
     )
     patchMon(s.state, 1, 0, { hp: 101 })
-    const layer = createTeamLayer({ roles: ['attacker', 'attacker'] })
+    const layer = createTeamLayer({ roles: ['attacker', 'attacker'], genes: { switchInSafety: 50 } })
     const trace: PolicyTraceEntry[] = []
     const choice = layer.policy(s, 1, trace)
     expect(trace[0]!.tags).toEqual(['team', 'counter'])
@@ -290,7 +290,7 @@ describe('cycle s20cc - counter: the bench mon qualifies through its floor move'
     expect(highestRoll(incoming)).toBe(5)
     expect(highestRoll(incoming) * 100).toBeLessThanOrEqual(50 * 145)
 
-    const layer = createTeamLayer({ roles: ['attacker', 'attacker'] })
+    const layer = createTeamLayer({ roles: ['attacker', 'attacker'], genes: { switchInSafety: 50 } })
     const trace: PolicyTraceEntry[] = []
     const choice = layer.policy(s, 1, trace)
     expect(trace[0]!.tags).toEqual(['team', 'counter'])
@@ -314,7 +314,7 @@ describe('cycle s20cc - counter: the bench mon qualifies through its floor move'
     patchMon(s.state, 1, 0, { hp: 101 })
     expect(2 * 50).toBeLessThan(101)
 
-    const layer = createTeamLayer({ roles: ['attacker', 'attacker'] })
+    const layer = createTeamLayer({ roles: ['attacker', 'attacker'], genes: { switchInSafety: 50 } })
     const trace: PolicyTraceEntry[] = []
     layer.policy(s, 1, trace)
     expect(trace[0]!.tags).not.toEqual(['team', 'counter'])

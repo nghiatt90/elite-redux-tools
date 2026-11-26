@@ -315,8 +315,9 @@ describe('cycle 947 - team layer: replacement', () => {
     expect(machampOffense).toBeCloseTo(53.1875, 4)
     const machampIncoming = highestRoll(rangeOnOurReserve(s, 'MOVE_BODY_SLAM', 1)!)
     expect(machampIncoming).toBe(58)
-    // Machamp 58/165 = 35.2% is acceptable under the default 50% line, but it
-    // is NOT acceptable under a 20% line -- that is the third case below.
+    // Machamp 58/165 = 35.2% is acceptable under a 50% line (pinned here;
+    // default is now 20%), but it is NOT acceptable under a 20% line -- that
+    // is the third case below.
     expect(machampIncoming * 100).toBeLessThanOrEqual(50 * 165)
     expect(machampIncoming * 100).toBeGreaterThan(20 * 165)
     const score = (offenseMean: number, incomingHigh: number, hp: number): number => offenseMean / 165 - incomingHigh / hp
@@ -325,9 +326,13 @@ describe('cycle 947 - team layer: replacement', () => {
     )
 
     // The preserve member (Aggron) outscores our Machamp, and removing the
-    // preserve filter would return it. With the filter, our Machamp's 35.2% is
-    // acceptable, so the preserve member is skipped and slot 1 comes in.
-    const skipLayer = createTeamLayer({ roles: ['attacker', 'attacker', 'attacker'], genes: { preserve: 2 } })
+    // preserve filter would return it. With the filter and switchInSafety 50,
+    // our Machamp's 35.2% is acceptable, so the preserve member is skipped and
+    // slot 1 comes in.
+    const skipLayer = createTeamLayer({
+      roles: ['attacker', 'attacker', 'attacker'],
+      genes: { preserve: 2, switchInSafety: 50 },
+    })
     skipLayer.policy(s, 1, [])
     patchMon(s.state, 0, 0, { hp: 0 })
     expect(skipLayer.replacement(s.state, 0)).toBe(1)

@@ -60,8 +60,10 @@ import {
   SAMPLE_COUNT,
   bestByDamage,
   chooseRoleAction,
+  damageDistribution,
   evaluateMoves,
   highestRoll,
+  koProbability,
   lowestRoll,
   meanRoll,
   moveIdOf,
@@ -93,16 +95,20 @@ export const TEAM_PURPOSES: readonly TeamPurpose[] = [
 
 /** The team genes of decision 14: the purpose order (a permutation of
  * `TEAM_PURPOSES`, a GA gene), an on/off flag per purpose, the switch-in safety
- * threshold, and the party slot the team protects. */
+ * threshold, the other-move KO risk, and the party slot the team protects. */
 export interface TeamGenes {
   /** The order the purposes are checked in; a permutation of `TEAM_PURPOSES`. */
   purposeOrder: TeamPurpose[]
   /** One on/off gene per purpose. A false flag skips that purpose entirely. */
   purposeFlags: Record<TeamPurpose, boolean>
   /** Percent of the candidate's CURRENT HP the predicted move may remove and
-   * still count as a safe switch-in. MODEL CHOICE: decision 14's default 50,
-   * not a game fact. */
+   * still count as a safe switch-in. MODEL CHOICE: decision 14's default 20
+   * (negligible loss; GA values 10 / 20 / 30), not a game fact. */
   switchInSafety: number
+  /** Probability threshold at which any other usable opponent move KOs the
+   * candidate and refuses the switch-in. MODEL CHOICE: decision 14's default
+   * 0.15 (GA values 0.05 / 0.15 / 0.30). */
+  otherMoveKoRisk: number
   /** Party index of the mon to protect; null means the team has no preserve
    * member. MODEL CHOICE: the design default is null. */
   preserve: number | null
@@ -110,10 +116,11 @@ export interface TeamGenes {
 
 /** Decision 14's defaults: "six purposes, checked in the GENE order (a
  * permutation) ... each with an on/off gene"; "Team genes: purpose order,
- * purpose flags, switch-in safety threshold, preserve". The order below is the
- * design's own listing (preserve, sacrifice, counter, entry ability, bring in
- * support, PP stall loop), every flag on, the 50% switch-in safety line the
- * design names as its threshold and no preserve member. */
+ * purpose flags, switch-in safety threshold, other-move KO risk, preserve".
+ * The order below is the design's own listing (preserve, sacrifice, counter,
+ * entry ability, bring in support, PP stall loop), every flag on, the 20%
+ * switch-in safety line (negligible loss), the 0.15 other-move KO risk,
+ * and no preserve member. */
 export const DEFAULT_TEAM_GENES: TeamGenes = {
   purposeOrder: [...TEAM_PURPOSES],
   purposeFlags: {
@@ -124,7 +131,8 @@ export const DEFAULT_TEAM_GENES: TeamGenes = {
     support: true,
     ppLoop: true,
   },
-  switchInSafety: 50,
+  switchInSafety: 20,
+  otherMoveKoRisk: 0.15,
   preserve: null,
 }
 
@@ -280,7 +288,7 @@ interface BenchScore {
   score: number
 }
 
-function scoreBench(
+export function scoreBench(
   session: BattleSession,
   slot: number,
   predictedMoveIds: readonly string[],
@@ -321,6 +329,44 @@ function pickBestBench(pool: BenchScore[]): BenchScore | null {
     if (best === null || betterBench(candidate, best)) best = candidate
   }
   return best
+}
+
+/** Their active mon's moves that still have PP and therefore can be forced. */
+export function theirUsableMoves(session: BattleSession): string[] {
+  const their = session.state.battlers[1]
+  if (!their) return []
+  const moves: string[] = []
+  for (let i = 0; i < their.mon.moves.length; i++) {
+    const moveId = their.mon.moves[i]
+    const pp = their.mon.pp[i]
+    if (moveId && pp > 0) moves.push(moveId)
+  }
+  return moves
+}
+
+/**
+ * Switch-in rule for counter, entryAbility, support:
+ * (a) the predicted move costs it at most `switchInSafety`% of its CURRENT HP
+ *     (scoreBench `acceptable`).
+ * (b) NO move their active mon has with PP left (`theirUsableMoves(session)`)
+ *     KOs the candidate with probability >= `genes.otherMoveKoRisk`.
+ */
+export function acceptableSwitchIn(
+  session: BattleSession,
+  slot: number,
+  predictedMoveIds: readonly string[],
+  genes: TeamGenes,
+): BenchScore | null {
+  const scored = scoreBench(session, slot, predictedMoveIds, genes.switchInSafety)
+  if (!scored || !scored.acceptable) return null
+  const reserve = session.state.sides[0].party[slot]
+  if (!reserve || reserve.hp <= 0) return null
+  for (const moveId of theirUsableMoves(session)) {
+    const range = rangeOnOurReserve(session, moveId, slot)
+    const prob = koProbability(damageDistribution(range), reserve.hp)
+    if (prob >= genes.otherMoveKoRisk) return null
+  }
+  return scored
 }
 
 // ---------------------------------------------------------------------------
@@ -550,6 +596,65 @@ function ppLoopSnapshot(session: BattleSession, turn: number): PpLoopSnapshot {
 }
 
 // ---------------------------------------------------------------------------
+// Stay test
+// ---------------------------------------------------------------------------
+
+/** Fixed threshold for the stay test: active mon stays when KO probability
+ * times accuracy is at least 50% (MODEL CHOICE: fixed, not a gene). */
+export const STAY_KO_CHANCE = 0.5
+
+export interface StayDecision {
+  stay: boolean
+  outspeedsWithKo: boolean
+}
+
+/**
+ * Stay test: switching gives the opponent a free hit, so never switch when we
+ * can KO.
+ *
+ * Checks candidate moves from `evaluateMoves(session, null)` (active mon vs
+ * battler 1). A move qualifies as a KO move when:
+ *   koProbability(damageDistribution(info.range), theirActiveHp(session)) * (info.accuracy / 100) >= STAY_KO_CHANCE
+ *
+ * Fake Out off the first turn is excluded.
+ *
+ * The active mon STAYS when some KO move satisfies:
+ *   outspeeds(session, thatMove.choice.action, view.predictedAction) OR !view.koThreat
+ */
+export function stayTest(
+  session: BattleSession,
+  view: PredictionView,
+): StayDecision {
+  const theirHp = theirActiveHp(session)
+  if (theirHp <= 0) return { stay: false, outspeedsWithKo: false }
+
+  let hasOutspeedingKo = false
+  let hasSurvivingKo = false
+
+  for (const info of evaluateMoves(session, null)) {
+    if (!info.range || info.range.isImmune) continue
+    const effect = session.data.dataContext.move(info.moveId)?.effect
+    if (effect === 'EFFECT_FAKE_OUT' && !session.state.battlers[0]?.volatiles.isFirstTurn) {
+      continue
+    }
+    const koChance =
+      koProbability(damageDistribution(info.range), theirHp) * (info.accuracy / 100)
+    if (koChance < STAY_KO_CHANCE) continue
+
+    if (outspeeds(session, info.choice.action, view.predictedAction)) {
+      hasOutspeedingKo = true
+    } else if (!view.koThreat) {
+      hasSurvivingKo = true
+    }
+  }
+
+  return {
+    stay: hasOutspeedingKo || hasSurvivingKo,
+    outspeedsWithKo: hasOutspeedingKo,
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Purposes
 // ---------------------------------------------------------------------------
 
@@ -665,9 +770,8 @@ function ruleCounter(
 
   const candidates: BenchScore[] = []
   for (const slot of livingBenchSlots(session)) {
-    const scored = scoreBench(session, slot, [view.predictedMoveId], genes.switchInSafety)
+    const scored = acceptableSwitchIn(session, slot, [view.predictedMoveId], genes)
     if (!scored) continue
-    if (scored.incomingFraction * 100 > genes.switchInSafety) continue
     const koInTwo = 2 * scored.lowestRoll >= theirHp
     const fastHeavy = benchFastHeavy(session, slot, theirHp, view.predictedAction)
     if (!koInTwo && !fastHeavy) continue
@@ -678,9 +782,10 @@ function ruleCounter(
 }
 
 /** entryAbility: a bench mon's switch-in ability applies now and the mon
- * survives the predicted move. A candidate qualifies when it holds one of
- * `ENTRY_ABILITIES_HANDLED`, survives the predicted move's highest roll, and
- * one of:
+ * qualifies under the switch-in rule (negligible loss under `switchInSafety`%
+ * of current HP and no other move KOs with >= `otherMoveKoRisk`). A candidate
+ * qualifies when it holds one of `ENTRY_ABILITIES_HANDLED`, satisfies the
+ * switch-in rule, and one of:
  *
  * - Intimidate: it holds ABILITY_INTIMIDATE, the predicted move is PHYSICAL,
  *   and the simulated entry actually lowered their active mon's Attack stage
@@ -712,13 +817,6 @@ function ruleEntryAbility(
   for (const slot of livingBenchSlots(session)) {
     const reserve = session.state.sides[0].party[slot]
     if (!reserve) continue
-    // Survive the predicted move: its highest roll must not reach our current
-    // HP. No prediction or an immune range counts as surviving.
-    if (predictedMoveId !== null) {
-      const incoming = rangeOnOurReserve(session, predictedMoveId, slot)
-      const high = incoming && !incoming.isImmune ? highestRoll(incoming) : 0
-      if (high >= reserve.hp) continue
-    }
 
     const probe = entryProbeFor(session, slot)
     if (!probe) continue
@@ -744,7 +842,12 @@ function ruleEntryAbility(
       fieldChangeBenefitsTeam(session, probe, predictedMoveId)
 
     if (!intimidate && !weather && !terrain) continue
-    const scored = scoreBench(session, slot, predictedMoveId ? [predictedMoveId] : [], genes.switchInSafety)
+    const scored = acceptableSwitchIn(
+      session,
+      slot,
+      predictedMoveId ? [predictedMoveId] : [],
+      genes,
+    )
     if (scored) candidates.push(scored)
   }
   if (candidates.length === 0) return null
@@ -757,7 +860,8 @@ function ruleEntryAbility(
  * candidate must be a living bench slot with role 'support', still have an
  * effect to set from its own position (`supportEffectPending` on a probe with
  * the candidate as battler 0 -- the role's own setter logic, not a copy), and
- * be acceptable under `switchInSafety` without being KO'd. */
+ * qualify under the switch-in rule (acceptable under `switchInSafety` and no
+ * other move KOs with >= `otherMoveKoRisk`). */
 function ruleSupport(
   session: BattleSession,
   view: PredictionView,
@@ -779,26 +883,12 @@ function ruleSupport(
       SUPPORT_PROBE_SEED,
     )
     if (!supportEffectPending(probe, view)) continue
-    const scored = scoreBench(session, slot, predictedIds, genes.switchInSafety)
+    const scored = acceptableSwitchIn(session, slot, predictedIds, genes)
     if (!scored) continue
-    if (!scored.acceptable || scored.incomingFraction >= 1) continue
     candidates.push(scored)
   }
   if (candidates.length === 0) return null
   return switchChoice(session, pickBestBench(candidates)!.slot, view)
-}
-
-/** Their active mon's moves that still have PP and therefore can be forced. */
-function theirUsableMoves(session: BattleSession): string[] {
-  const their = session.state.battlers[1]
-  if (!their) return []
-  const moves: string[] = []
-  for (let i = 0; i < their.mon.moves.length; i++) {
-    const moveId = their.mon.moves[i]
-    const pp = their.mon.pp[i]
-    if (moveId && pp > 0) moves.push(moveId)
-  }
-  return moves
 }
 
 interface PpLoopIncoming {
@@ -1091,6 +1181,7 @@ export function createTeamLayer(config: {
     purposeOrder: [...(config.genes?.purposeOrder ?? DEFAULT_TEAM_GENES.purposeOrder)],
     purposeFlags: { ...DEFAULT_TEAM_GENES.purposeFlags, ...config.genes?.purposeFlags },
     switchInSafety: config.genes?.switchInSafety ?? DEFAULT_TEAM_GENES.switchInSafety,
+    otherMoveKoRisk: config.genes?.otherMoveKoRisk ?? DEFAULT_TEAM_GENES.otherMoveKoRisk,
     preserve: config.genes?.preserve ?? DEFAULT_TEAM_GENES.preserve,
   }
   // A purpose order that is not a permutation of TEAM_PURPOSES is a developer
@@ -1168,37 +1259,41 @@ export function createTeamLayer(config: {
     // One prediction per call, at the role layer's own safety line, shared by
     // every purpose (decision 14: the same view feeds every rule).
     const view = readPredictions(session, DEFAULT_SAFETY_PCT)
+    const stay = stayTest(session, view)
 
-    for (const purpose of genes.purposeOrder) {
-      if (!genes.purposeFlags[purpose]) continue
-      let choice: PlayerChoice | null = null
-      switch (purpose) {
-        case 'preserve':
-          choice = rulePreserve(session, view, genes)
-          break
-        case 'sacrifice':
-          choice = ruleSacrifice(session, view, genes, roles)
-          break
-        case 'counter':
-          choice = ruleCounter(session, view, genes)
-          break
-        case 'entryAbility':
-          choice = ruleEntryAbility(session, view, genes)
-          break
-        case 'support':
-          choice = ruleSupport(session, view, genes, roles)
-          break
-        case 'ppLoop':
-          choice = rulePpLoop(session, view, ppLoopStopped)
-          break
-      }
-      if (choice) {
-        // A purpose-decided move is this battler's last move too, or the next
-        // call's `usedProtectionLastTurn` fallback would see the stale one.
-        memory.turn = session.state.turnCount + 1
-        memory.lastMove = moveIdOf(choice)
-        trace.push({ turn, choice: describePurpose(purpose, choice), tags: ['team', purpose] })
-        return choice
+    if (!stay.stay || !stay.outspeedsWithKo) {
+      for (const purpose of genes.purposeOrder) {
+        if (!genes.purposeFlags[purpose]) continue
+        if (stay.stay && purpose !== 'preserve') continue
+        let choice: PlayerChoice | null = null
+        switch (purpose) {
+          case 'preserve':
+            choice = rulePreserve(session, view, genes)
+            break
+          case 'sacrifice':
+            choice = ruleSacrifice(session, view, genes, roles)
+            break
+          case 'counter':
+            choice = ruleCounter(session, view, genes)
+            break
+          case 'entryAbility':
+            choice = ruleEntryAbility(session, view, genes)
+            break
+          case 'support':
+            choice = ruleSupport(session, view, genes, roles)
+            break
+          case 'ppLoop':
+            choice = rulePpLoop(session, view, ppLoopStopped)
+            break
+        }
+        if (choice) {
+          // A purpose-decided move is this battler's last move too, or the next
+          // call's `usedProtectionLastTurn` fallback would see the stale one.
+          memory.turn = session.state.turnCount + 1
+          memory.lastMove = moveIdOf(choice)
+          trace.push({ turn, choice: describePurpose(purpose, choice), tags: ['team', purpose] })
+          return choice
+        }
       }
     }
 

@@ -1399,7 +1399,7 @@ export function supportEffectPending(session: BattleSession, view: PredictionVie
  * forces the minimum (`isForcedMinRoll`); a multi-hit move uses the summed
  * `totalRolls` / `totalCritRolls`. A status move (`range === null`) and an
  * immune target both deal 0. */
-function damageDistribution(range: AiDamageRolls | null): number[] {
+export function damageDistribution(range: AiDamageRolls | null): number[] {
   if (!range || range.isImmune) return [0]
   const nonRolls = range.totalRolls ?? range.rolls
   const critRolls = range.totalRolls ? range.totalCritRolls : range.critRolls
@@ -1450,7 +1450,7 @@ function maxDamage(distribution: number[]): number {
 
 /** P(a hit KOs a battler at `hp`), read from the distribution itself. hp <= 0
  * is already a KO (calcKoChances returns [] there). */
-function koProbability(distribution: number[], hp: number): number {
+export function koProbability(distribution: number[], hp: number): number {
   if (hp <= 0) return 1
   return calcKoChances(distribution, hp, 1)[0]?.probability ?? 0
 }

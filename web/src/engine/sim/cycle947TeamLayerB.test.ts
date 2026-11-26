@@ -188,7 +188,7 @@ describe('cycle 947b - team layer: entry ability', () => {
 
     const layer = createTeamLayer({
       roles: ['attacker', 'attacker'],
-      genes: { purposeFlags: onlyPurpose('entryAbility') },
+      genes: { purposeFlags: onlyPurpose('entryAbility'), switchInSafety: 50 },
     })
     const trace: PolicyTraceEntry[] = []
     const choice = layer.policy(s, 1, trace)
@@ -226,7 +226,7 @@ describe('cycle 947b - team layer: entry ability', () => {
 
     const layer = createTeamLayer({
       roles: ['attacker', 'attacker'],
-      genes: { purposeFlags: onlyPurpose('entryAbility') },
+      genes: { purposeFlags: onlyPurpose('entryAbility'), switchInSafety: 50 },
     })
     const trace: PolicyTraceEntry[] = []
     const choice = layer.policy(s, 1, trace)
@@ -247,7 +247,7 @@ describe('cycle 947b - team layer: entry ability', () => {
 
     const layer = createTeamLayer({
       roles: ['attacker', 'attacker'],
-      genes: { purposeFlags: onlyPurpose('entryAbility') },
+      genes: { purposeFlags: onlyPurpose('entryAbility'), switchInSafety: 50 },
     })
     const trace: PolicyTraceEntry[] = []
     const choice = layer.policy(s, 1, trace)
@@ -286,10 +286,9 @@ describe('cycle 947b - team layer: entry ability', () => {
     const plain = meanFromReserve(s, 1, 'MOVE_THUNDERBOLT', { terrain: 0 })
     const boosted = meanFromReserve(s, 1, 'MOVE_THUNDERBOLT', { terrain: STATUS_FIELD_ELECTRIC_TERRAIN })
     expect(boosted).toBeGreaterThan(plain)
-
     const layer = createTeamLayer({
       roles: ['attacker', 'attacker'],
-      genes: { purposeFlags: onlyPurpose('entryAbility') },
+      genes: { purposeFlags: onlyPurpose('entryAbility'), switchInSafety: 90 },
     })
     const trace: PolicyTraceEntry[] = []
     const choice = layer.policy(s, 1, trace)
@@ -310,7 +309,7 @@ describe('cycle 947b - team layer: entry ability', () => {
 
     const layer = createTeamLayer({
       roles: ['attacker', 'attacker'],
-      genes: { purposeFlags: onlyPurpose('entryAbility') },
+      genes: { purposeFlags: onlyPurpose('entryAbility'), switchInSafety: 50 },
     })
     const trace: PolicyTraceEntry[] = []
     const choice = layer.policy(s, 1, trace)
@@ -331,7 +330,7 @@ describe('cycle 947b - team layer: support', () => {
 
     const layer = createTeamLayer({
       roles: ['attacker', 'support'],
-      genes: { purposeFlags: onlyPurpose('support') },
+      genes: { purposeFlags: onlyPurpose('support'), switchInSafety: 50 },
     })
     const trace: PolicyTraceEntry[] = []
     const choice = layer.policy(s, 1, trace)
