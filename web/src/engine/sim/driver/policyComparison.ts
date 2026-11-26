@@ -37,10 +37,11 @@ import type { SimDataBundle, TrainerData } from './loadSimData'
 import type { PolicyTraceEntry } from './policyBattle'
 import { playPolicyBattle, type PolicyBattleResult } from './policyBattle'
 import type { RoleName, RoleParams } from './rolePolicy'
-import { boostStatsOf } from './rolePolicy'
+import { DEFAULT_SAFETY_PCT, boostStatsOf, readPredictions } from './rolePolicy'
 import type { StepResult } from './session'
 import type { BattleSession } from './session'
-import { DEFAULT_TEAM_GENES, createTeamLayer } from './teamLayer'
+import type { StayDecision, TeamPurpose } from './teamLayer'
+import { DEFAULT_TEAM_GENES, TEAM_PURPOSES, createTeamLayer, stayTest } from './teamLayer'
 import { wilsonInterval } from './wilson'
 
 export const POLICY_GATE_Z = 1.96
@@ -237,6 +238,33 @@ export interface BatonCounters {
   batonBoostReceived: number
 }
 
+/** Observer-only team-layer counters (cycle s20j). `switches` and
+ * `turnsWithoutSwitch` come from the team layer's own trace tags, so they add
+ * no RNG draws and mutate nothing. The stay-test counters exist only when the
+ * observer was created with `stayProbe: true` (the role policy only). */
+export interface TeamCounters {
+  /** Turns whose own trace slice holds a `['team', purpose]` entry and whose
+   * chosen action is a switch -- a `SWITCH` action or a pivot move carrying
+   * `switchTo`. The chosen switch counts even if a pivot then misses or is
+   * cancelled. Faint replacements and role-layer pivots carry no `team` tag
+   * and are not counted. */
+  switches: Record<TeamPurpose, number>
+  /** Turns whose own trace slice holds a `['team', purpose]` entry and whose
+   * chosen action is not a switch (for example `sacrifice` leaving the active
+   * mon in to be fodder). Kept apart so the switch columns stay honest. */
+  turnsWithoutSwitch: Record<TeamPurpose, number>
+  /** Turns where the probed stay test returned `stay` true. */
+  stayTurns: number
+  /** Of those, turns where it also returned `outspeedsWithKo` true: every
+   * purpose is skipped. */
+  stayOutspeedTurns: number
+  /** Turns where `stay` is true, `outspeedsWithKo` is false, and the trace
+   * shows a `team`/`preserve` decision. */
+  stayPreserveFired: number
+  /** Wall time spent inside the stay probe, subtracted from the game's `ms`. */
+  probeMs: number
+}
+
 export interface ObservedTurn {
   turn: number
   player: ActiveView
@@ -263,6 +291,13 @@ export interface PolicyObserver {
   counters: BoostingCounters
   /** Observer-only Baton Pass own-boost counters (cycle s20h). */
   batonCounters: BatonCounters
+  /** Observer-only team-layer counters (cycle s20j). The stay counters stay
+   * zero when `stayProbe` is off. */
+  teamCounters: TeamCounters
+  /** The role policy's chosen action on turn 1: `'SWITCH'`, `'NONE'`, or the
+   * chosen move id (a pivot move is reported by its move id). Undefined when no
+   * turn 1 decision was observed. */
+  turn1Action?: string
   aiSwitchSummary: { total: number; byThing: Record<string, number> }
   /** Per-turn captures, populated only when `collectLog` is on. */
   turns: ObservedTurn[]
@@ -288,6 +323,8 @@ interface PendingCapture {
   switchedIn: boolean
   hasBoostingChoice: boolean
   boostingIds: Set<string>
+  /** The probed stay decision, when the observer was created with `stayProbe`. */
+  stayProbe: StayDecision | null
   trace: PolicyTraceEntry[]
 }
 
@@ -345,6 +382,7 @@ function captureTurn(session: BattleSession, turn: number): PendingCapture {
     switchedIn: (active?.volatiles.isFirstTurn ?? 0) !== 0,
     hasBoostingChoice,
     boostingIds,
+    stayProbe: null,
     trace: [],
   }
 }
@@ -352,7 +390,9 @@ function captureTurn(session: BattleSession, turn: number): PendingCapture {
 /** One observer per game. `wrap` is passed as `playPolicyBattle`'s `policy`;
  * `onTurn` as its `onTurn` hook. The wrapper only reads the session (legal
  * choices are pure), so it consumes no RNG and mutates nothing. */
-export function createPolicyObserver(options: { collectLog?: boolean } = {}): PolicyObserver {
+export function createPolicyObserver(
+  options: { collectLog?: boolean; stayProbe?: boolean } = {},
+): PolicyObserver {
   const counters: BoostingCounters = {
     available: 0,
     used: 0,
@@ -365,8 +405,19 @@ export function createPolicyObserver(options: { collectLog?: boolean } = {}): Po
     batonBoostPasses: 0,
     batonBoostReceived: 0,
   }
+  const emptyPurposes = (): Record<TeamPurpose, number> =>
+    Object.fromEntries(TEAM_PURPOSES.map((purpose) => [purpose, 0])) as Record<TeamPurpose, number>
+  const teamCounters: TeamCounters = {
+    switches: emptyPurposes(),
+    turnsWithoutSwitch: emptyPurposes(),
+    stayTurns: 0,
+    stayOutspeedTurns: 0,
+    stayPreserveFired: 0,
+    probeMs: 0,
+  }
   const aiSwitchSummary = { total: 0, byThing: {} as Record<string, number> }
   const turns: ObservedTurn[] = []
+  let turn1Action: string | undefined
   let pending: PendingCapture | null = null
   let ownBoostSinceSwitchIn = false
   let pendingBatonPass: PendingBatonPass | null = null
@@ -393,6 +444,15 @@ export function createPolicyObserver(options: { collectLog?: boolean } = {}): Po
     const before = trace.length
     pending = captureTurn(session, turn)
     resolvePendingBatonPass(pending)
+    // Probe the stay test before the inner policy runs, because the team layer
+    // does not trace it. The probe is read-only (see the s20i case-9 test) and
+    // its time is subtracted from the game's `ms`.
+    if (options.stayProbe && pending.activeAlive) {
+      const probeStarted = performance.now()
+      const view = readPredictions(session, DEFAULT_SAFETY_PCT)
+      pending.stayProbe = stayTest(session, view)
+      teamCounters.probeMs += performance.now() - probeStarted
+    }
     const choice = policy(session, turn, trace)
     pending.trace = trace.slice(before)
     return choice
@@ -407,6 +467,40 @@ export function createPolicyObserver(options: { collectLog?: boolean } = {}): Po
       choice && choice.action.action === 'USE_MOVE'
         ? (choice.action.chosenMove?.id ?? choice.action.moveToBeUsed?.id ?? null)
         : null
+
+    if (turn === 1) {
+      turn1Action =
+        choice === null
+          ? 'NONE'
+          : choice.action.action === 'SWITCH'
+            ? 'SWITCH'
+            : (choice.action.chosenMove?.id ?? choice.action.moveToBeUsed?.id ?? choice.action.action)
+    }
+
+    // Team-layer columns, from the layer's own tags and the chosen action.
+    const chosenSwitch =
+      choice !== null &&
+      (choice.action.action === 'SWITCH' || choice.switchTo !== undefined)
+    for (const entry of captured.trace) {
+      if (entry.tags[0] !== 'team') continue
+      const purpose = entry.tags[1] as TeamPurpose
+      if (!TEAM_PURPOSES.includes(purpose)) continue
+      if (chosenSwitch) teamCounters.switches[purpose]++
+      else teamCounters.turnsWithoutSwitch[purpose]++
+    }
+
+    if (captured.stayProbe) {
+      if (captured.stayProbe.stay) {
+        teamCounters.stayTurns++
+        if (captured.stayProbe.outspeedsWithKo) {
+          teamCounters.stayOutspeedTurns++
+        } else if (
+          captured.trace.some((entry) => entry.tags[0] === 'team' && entry.tags[1] === 'preserve')
+        ) {
+          teamCounters.stayPreserveFired++
+        }
+      }
+    }
 
     if (captured.switchedIn) ownBoostSinceSwitchIn = false
 
@@ -491,7 +585,18 @@ export function createPolicyObserver(options: { collectLog?: boolean } = {}): Po
     }
   }
 
-  return { wrap, onTurn, counters, batonCounters, aiSwitchSummary, turns }
+  return {
+    wrap,
+    onTurn,
+    counters,
+    batonCounters,
+    teamCounters,
+    get turn1Action() {
+      return turn1Action
+    },
+    aiSwitchSummary,
+    turns,
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -526,6 +631,14 @@ export interface ComparisonGameRecord {
   batonBoostFired?: number
   batonBoostPasses?: number
   batonBoostReceived?: number
+  /** Optional because older record literals and per-fight JSON predate the
+   * team-layer columns (cycle s20j). Set for role games only. */
+  teamSwitches?: Record<TeamPurpose, number>
+  teamTurnsWithoutSwitch?: Record<TeamPurpose, number>
+  teamStayTurns?: number
+  teamStayOutspeedTurns?: number
+  teamStayPreserveFired?: number
+  turn1Action?: string
   log?: string
 }
 
@@ -551,7 +664,10 @@ export function playComparisonGame(
   options: ComparisonGameOptions = {},
 ): ComparisonGameRecord {
   const maxTurns = options.maxTurns ?? 200
-  const observer = createPolicyObserver({ collectLog: options.collectLog })
+  const observer = createPolicyObserver({
+    collectLog: options.collectLog,
+    stayProbe: policyKind === 'role',
+  })
   const common = {
     data: setup.data,
     playerParty: setup.party,
@@ -585,7 +701,7 @@ export function playComparisonGame(
       chooseExpectimaxAction(session, DEFAULT_EXPECTIMAX, (seed * 31 + turn) >>> 0)
     result = playPolicyBattle({ ...common, policy: observer.wrap(policy) })
   }
-  const ms = performance.now() - started
+  const ms = performance.now() - started - observer.teamCounters.probeMs
 
   const record: ComparisonGameRecord = {
     seed,
@@ -606,6 +722,14 @@ export function playComparisonGame(
     batonBoostFired: observer.batonCounters.batonBoostFired,
     batonBoostPasses: observer.batonCounters.batonBoostPasses,
     batonBoostReceived: observer.batonCounters.batonBoostReceived,
+  }
+  if (policyKind === 'role') {
+    record.teamSwitches = { ...observer.teamCounters.switches }
+    record.teamTurnsWithoutSwitch = { ...observer.teamCounters.turnsWithoutSwitch }
+    record.teamStayTurns = observer.teamCounters.stayTurns
+    record.teamStayOutspeedTurns = observer.teamCounters.stayOutspeedTurns
+    record.teamStayPreserveFired = observer.teamCounters.stayPreserveFired
+    if (observer.turn1Action !== undefined) record.turn1Action = observer.turn1Action
   }
   if (observer.turns.length > 0) record.log = formatBattleLog(observer.turns, result)
   return record
@@ -777,6 +901,15 @@ export interface PolicySummary {
   batonBoostFired?: number
   batonBoostPasses?: number
   batonBoostReceived?: number
+  /** Optional because the committed per-fight JSON files of earlier runs predate
+   * the team-layer columns (cycle s20j). Left undefined when no record in the
+   * fight carried them, so the report renders `-`. */
+  teamSwitches?: Record<TeamPurpose, number>
+  teamTurnsWithoutSwitch?: Record<TeamPurpose, number>
+  teamStayTurns?: number
+  teamStayOutspeedTurns?: number
+  teamStayPreserveFired?: number
+  turn1Actions?: Record<string, number>
 }
 
 export function summarizePolicy(
@@ -795,7 +928,7 @@ export function summarizePolicy(
   }
   const total = (pick: (record: ComparisonGameRecord) => number): number =>
     records.reduce((sum, record) => sum + pick(record), 0)
-  return {
+  const summary: PolicySummary = {
     policy,
     wins,
     games,
@@ -815,6 +948,37 @@ export function summarizePolicy(
     batonBoostPasses: total((record) => record.batonBoostPasses ?? 0),
     batonBoostReceived: total((record) => record.batonBoostReceived ?? 0),
   }
+  if (records.some((record) => record.teamSwitches !== undefined)) {
+    const switches = Object.fromEntries(TEAM_PURPOSES.map((purpose) => [purpose, 0])) as Record<
+      TeamPurpose,
+      number
+    >
+    const withoutSwitch = Object.fromEntries(
+      TEAM_PURPOSES.map((purpose) => [purpose, 0]),
+    ) as Record<TeamPurpose, number>
+    for (const record of records) {
+      for (const purpose of TEAM_PURPOSES) {
+        switches[purpose] += record.teamSwitches?.[purpose] ?? 0
+        withoutSwitch[purpose] += record.teamTurnsWithoutSwitch?.[purpose] ?? 0
+      }
+    }
+    summary.teamSwitches = switches
+    summary.teamTurnsWithoutSwitch = withoutSwitch
+  }
+  if (records.some((record) => record.teamStayTurns !== undefined)) {
+    summary.teamStayTurns = total((record) => record.teamStayTurns ?? 0)
+    summary.teamStayOutspeedTurns = total((record) => record.teamStayOutspeedTurns ?? 0)
+    summary.teamStayPreserveFired = total((record) => record.teamStayPreserveFired ?? 0)
+  }
+  if (records.some((record) => record.turn1Action !== undefined)) {
+    const turn1Actions: Record<string, number> = {}
+    for (const record of records) {
+      if (record.turn1Action === undefined) continue
+      turn1Actions[record.turn1Action] = (turn1Actions[record.turn1Action] ?? 0) + 1
+    }
+    summary.turn1Actions = turn1Actions
+  }
+  return summary
 }
 
 export interface FightMeasurement {
@@ -847,6 +1011,13 @@ function switchBreakdown(summary: PolicySummary): string {
   const entries = Object.entries(summary.aiSwitchByThing).sort((a, b) => b[1] - a[1])
   if (entries.length === 0) return 'none'
   return entries.map(([thing, count]) => `${thing}=${count}`).join(', ')
+}
+
+function purposeBreakdown(counts: Record<TeamPurpose, number>): string {
+  const entries = TEAM_PURPOSES.filter((purpose) => (counts[purpose] ?? 0) > 0).map(
+    (purpose) => `${purpose}=${counts[purpose]}`,
+  )
+  return entries.length === 0 ? 'none' : entries.join(', ')
 }
 
 /** Renders the gate report from measured results only. There is deliberately no
@@ -911,6 +1082,24 @@ export function renderGateReport(input: GateReportInput): string {
   }
   lines.push(
     '- AI voluntary switches: turns where the AI\'s selection-time action is `SWITCH`, broken down by what our policy did that turn (a move id, `SWITCH`, or `NONE`). Replacements after a faint and pivot moves are not counted.',
+  )
+  lines.push(
+    '- `team` voluntary switch: a turn whose own trace slice holds a `team`-tagged decision with that purpose, and whose chosen action is a switch -- a `SWITCH` action or a pivot move carrying `switchTo`. The chosen switch counts even if a pivot then misses or is cancelled. Faint replacements and role-layer pivots carry no `team` tag and are not counted.',
+  )
+  lines.push(
+    '- `team` turns without switch: a `team`-tagged decision whose chosen action is not a switch (for example `sacrifice` leaving the active mon in as fodder). Kept apart so the switch columns stay honest.',
+  )
+  lines.push(
+    '- `stay-test turns`: turns where a read-only probe of the same stay test the team layer runs (`stayTest(session, readPredictions(session, DEFAULT_SAFETY_PCT))`, before the policy runs, role policy only) returned `stay`. `stay with outspeeding KO` also returned `outspeedsWithKo`, so every purpose is skipped. `preserve fired on a stay turn` is a stay turn without an outspeeding KO whose trace shows `team`/`preserve`.',
+  )
+  lines.push(
+    '- Stay-test limit: these count turns where the stay test closed the purposes. They do not say a purpose would have switched on that turn, so they are an upper bound on "switches blocked by the stay test"; the exact counterfactual cannot be measured without changing `teamLayer.ts`, which is out of scope.',
+  )
+  lines.push(
+    '- `ms/game` is wall time per game. It was measured with six fights running in parallel on 8 cores, so it is contested. For role games the stay-probe wall time is subtracted; the probe adds time to role games only.',
+  )
+  lines.push(
+    '- Turn 1 action: the role policy\'s choice on the first turn -- `SWITCH` for a hard switch, `NONE` for a null choice, otherwise the chosen move id (a pivot move is reported by its move id).',
   )
   lines.push(
     '- Classification: `uninformative` when both win rates are strictly under 20%; otherwise `role>=expectimax` or `role<expectimax` from the raw win rates.',
@@ -999,6 +1188,55 @@ export function renderGateReport(input: GateReportInput): string {
         ]),
       )
     }
+  }
+  lines.push('')
+
+  lines.push('## Team layer (role policy)', '')
+  lines.push(
+    tableRow([
+      'Fight',
+      ...TEAM_PURPOSES,
+      'Team turns without switch',
+      'Stay-test turns',
+      'Stay with outspeeding KO',
+      'Preserve fired on a stay turn',
+    ]),
+  )
+  lines.push(tableRow(Array(11).fill('---')))
+  for (const fight of input.fights) {
+    const summary = fight.role
+    lines.push(
+      tableRow([
+        fight.key,
+        ...TEAM_PURPOSES.map((purpose) =>
+          summary.teamSwitches === undefined ? '-' : String(summary.teamSwitches[purpose] ?? 0),
+        ),
+        summary.teamTurnsWithoutSwitch === undefined
+          ? '-'
+          : purposeBreakdown(summary.teamTurnsWithoutSwitch),
+        summary.teamStayTurns === undefined ? '-' : String(summary.teamStayTurns),
+        summary.teamStayOutspeedTurns === undefined
+          ? '-'
+          : String(summary.teamStayOutspeedTurns),
+        summary.teamStayPreserveFired === undefined
+          ? '-'
+          : String(summary.teamStayPreserveFired),
+      ]),
+    )
+  }
+  lines.push('')
+
+  lines.push('## Turn 1 actions (role policy)', '')
+  lines.push(tableRow(['Fight', 'Turn 1 action counts']))
+  lines.push(tableRow(Array(2).fill('---')))
+  for (const fight of input.fights) {
+    const actions = fight.role.turn1Actions
+    let cell = '-'
+    if (actions !== undefined) {
+      const entries = Object.entries(actions).sort((a, b) => b[1] - a[1])
+      cell = entries.length === 0 ? 'none' : entries.map(([action, count]) => `${action}=${count}`).join(', ')
+    }
+    lines.push(tableRow([fight.key, cell]))
   }
   lines.push('')
 

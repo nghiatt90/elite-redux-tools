@@ -9,20 +9,44 @@
     "rate": 0,
     "lower": -3.469446951953614e-18,
     "upper": 0.0458197362645751,
-    "msPerGame": 1115.7403938500006,
+    "msPerGame": 1303.0334110500003,
     "capped": 0,
-    "available": 105,
+    "available": 173,
     "used": 0,
     "boosted": 0,
     "attackedWhileBoosted": 0,
-    "positiveStage": 1,
-    "aiSwitches": 1,
+    "positiveStage": 2,
+    "aiSwitches": 25,
     "aiSwitchByThing": {
-      "MOVE_MOONBLAST": 1
+      "MOVE_SNIPE_SHOT": 19,
+      "SWITCH": 4,
+      "MOVE_BATON_PASS": 2
     },
     "batonBoostFired": 0,
     "batonBoostPasses": 0,
-    "batonBoostReceived": 0
+    "batonBoostReceived": 0,
+    "teamSwitches": {
+      "preserve": 0,
+      "sacrifice": 278,
+      "counter": 78,
+      "entryAbility": 0,
+      "support": 16,
+      "ppLoop": 0
+    },
+    "teamTurnsWithoutSwitch": {
+      "preserve": 0,
+      "sacrifice": 552,
+      "counter": 0,
+      "entryAbility": 0,
+      "support": 0,
+      "ppLoop": 0
+    },
+    "teamStayTurns": 170,
+    "teamStayOutspeedTurns": 144,
+    "teamStayPreserveFired": 0,
+    "turn1Actions": {
+      "SWITCH": 80
+    }
   },
   "expectimax": {
     "policy": "expectimax",
@@ -31,7 +55,7 @@
     "rate": 0,
     "lower": -3.469446951953614e-18,
     "upper": 0.0458197362645751,
-    "msPerGame": 1659.797752975,
+    "msPerGame": 1705.9139844374993,
     "capped": 0,
     "available": 307,
     "used": 38,

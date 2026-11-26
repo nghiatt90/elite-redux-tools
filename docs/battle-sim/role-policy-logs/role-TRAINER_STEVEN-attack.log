@@ -10,69 +10,93 @@ Turn 1
 Turn 2
   player: SPECIES_KINGDRA_MEGA HP 235/235 status none
   opponent: SPECIES_METAGROSS HP 243/243 status none stages spa+1
+  our choice: SWITCH -> SPECIES_MR_MIME
+  trace: team:sacrifice -> 3
+  AI action: USE_MOVE MOVE_PSYCHOKINETIC_SLAM
+  action: battler=0 action=SWITCH missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=162 attackerDamage=54 fainted=[] statusApplied=none
+Turn 3
+  player: SPECIES_MR_MIME HP 81/229 status none
+  opponent: SPECIES_METAGROSS_MEGA HP 189/243 status none stages spa+1
+  our choice: MOVE_MOONBLAST
+  trace: team:sacrifice MOVE_MOONBLAST
+  AI action: USE_MOVE MOVE_METEOR_MASH
+  action: battler=1 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=49 attackerDamage=- fainted=[] statusApplied=none
+Turn 4
+  player: SPECIES_MR_MIME HP 95/229 status none
+  opponent: SPECIES_METAGROSS_MEGA HP 140/243 status none stages spa+1
+  our choice: MOVE_MOONBLAST
+  trace: team:sacrifice MOVE_MOONBLAST
+  AI action: USE_MOVE MOVE_METEOR_MASH
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=218 attackerDamage=- fainted=[0] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 5
+  player: SPECIES_KINGDRA_MEGA HP 235/235 status none
+  opponent: SPECIES_METAGROSS_MEGA HP 140/243 status none stages spa+1
   our choice: MOVE_RAIN_DANCE
   trace: support:weather MOVE_RAIN_DANCE
   AI action: USE_MOVE MOVE_PSYCHOKINETIC_SLAM
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=251 attackerDamage=78 fainted=[0] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=166 attackerDamage=55 fainted=[] statusApplied=none
   action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
-Turn 3
-  player: SPECIES_SCYTHER_MEGA HP 227/227 status none
-  opponent: SPECIES_METAGROSS_MEGA HP 165/243 status none stages spa+1
-  our choice: MOVE_FURY_CUTTER
-  trace: attacker:ko MOVE_FURY_CUTTER
+Turn 6
+  player: SPECIES_KINGDRA_MEGA HP 69/235 status none
+  opponent: SPECIES_METAGROSS_MEGA HP 85/243 status none stages spa+1
+  our choice: MOVE_SNIPE_SHOT
+  trace: team:sacrifice MOVE_SNIPE_SHOT
   AI action: USE_MOVE MOVE_METEOR_MASH
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=207 attackerDamage=- fainted=[1] statusApplied=none
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
-Turn 4
-  player: SPECIES_SCYTHER_MEGA HP 227/227 status none
-  opponent: SPECIES_HEATRAN HP 261/261 status none
-  our choice: MOVE_KARATE_CHOP
-  trace: attacker:damage MOVE_KARATE_CHOP
-  AI action: USE_MOVE MOVE_BURN_UP
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=190 attackerDamage=- fainted=[] statusApplied=none
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=418 attackerDamage=- fainted=[0] statusApplied=none
-Turn 5
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=100 attackerDamage=- fainted=[0] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 7
   player: SPECIES_KAIOSEA HP 259/259 status none
-  opponent: SPECIES_HEATRAN HP 71/261 status none
+  opponent: SPECIES_METAGROSS_MEGA HP 85/243 status none stages spa+1
   our choice: MOVE_AQUA_BASH
   trace: attacker:ko MOVE_AQUA_BASH
-  AI action: USE_MOVE MOVE_FLASH_CANNON
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=117 attackerDamage=- fainted=[1] statusApplied=none
+  AI action: USE_MOVE MOVE_PSYCHOKINETIC_SLAM
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=216 attackerDamage=- fainted=[1] statusApplied=none
   action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
-Turn 6
+Turn 8
   player: SPECIES_KAIOSEA HP 259/259 status none
   opponent: SPECIES_KARTANA_FALLEN HP 370/370 status none
   our choice: MOVE_AQUA_BASH
-  trace: attacker:damage MOVE_AQUA_BASH
+  trace: team:sacrifice MOVE_AQUA_BASH
   AI action: USE_MOVE MOVE_LEAF_BLADE
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=64 attackerDamage=- fainted=[] statusApplied=none
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=150 attackerDamage=- fainted=[] statusApplied=none
-Turn 7
-  player: SPECIES_KAIOSEA HP 125/259 status none
-  opponent: SPECIES_KARTANA_FALLEN HP 306/370 status none
-  our choice: MOVE_AQUA_BASH
-  trace: attacker:damage MOVE_AQUA_BASH
-  AI action: USE_MOVE MOVE_LEAF_BLADE
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=61 attackerDamage=- fainted=[] statusApplied=none
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=519 attackerDamage=- fainted=[0] statusApplied=none
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
-Turn 8
-  player: SPECIES_MR_MIME HP 229/229 status none
-  opponent: SPECIES_KARTANA_FALLEN HP 245/370 status none stages atk+1
-  our choice: MOVE_BATON_PASS (switchTo 5: SPECIES_SOPRANICE)
-  trace: support:pivot MOVE_BATON_PASS
-  AI action: USE_MOVE MOVE_EXCALIBUR
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=600 attackerDamage=- fainted=[0] statusApplied=none
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=92 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=167 attackerDamage=- fainted=[] statusApplied=none
 Turn 9
+  player: SPECIES_KAIOSEA HP 108/259 status none
+  opponent: SPECIES_KARTANA_FALLEN HP 278/370 status none
+  our choice: MOVE_AQUA_BASH
+  trace: team:sacrifice MOVE_AQUA_BASH
+  AI action: USE_MOVE MOVE_LEAF_BLADE
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=96 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=508 attackerDamage=- fainted=[0] statusApplied=none
+Turn 10
+  player: SPECIES_SCYTHER_MEGA HP 227/227 status none
+  opponent: SPECIES_KARTANA_FALLEN HP 182/370 status none stages atk+1
+  our choice: MOVE_FURY_CUTTER
+  trace: attacker:ko MOVE_FURY_CUTTER
+  AI action: USE_MOVE MOVE_AQUA_CUTTER
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=209 attackerDamage=- fainted=[1] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 11
+  player: SPECIES_SCYTHER_MEGA HP 227/227 status none
+  opponent: SPECIES_ZACIAN_CROWNED_SWORD HP 262/262 status none stages atk+1
+  our choice: MOVE_FURY_SWIPES
+  trace: attacker:damage MOVE_FURY_SWIPES
+  AI action: USE_MOVE MOVE_DIAMOND_BLADE
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=89 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=1935 attackerDamage=- fainted=[0] statusApplied=none
+Turn 12
   player: SPECIES_SOPRANICE HP 235/235 status none
-  opponent: SPECIES_KARTANA_FALLEN HP 245/370 status none stages atk+2
+  opponent: SPECIES_ZACIAN_CROWNED_SWORD HP 173/262 status none stages atk+5
   our choice: MOVE_BOOMBURST
-  trace: attacker:ko MOVE_BOOMBURST
-  AI action: USE_MOVE MOVE_EXCALIBUR
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=1526 attackerDamage=- fainted=[0] statusApplied=none
+  trace: attacker:damage MOVE_BOOMBURST
+  AI action: USE_MOVE MOVE_LEECH_BLADE
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=478 attackerDamage=- fainted=[0] statusApplied=none
   action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
-Outcome: LOST in 9 turns
+Outcome: LOST in 12 turns
 
 == TRAINER_STEVEN-attack role game 2 seed 2000 ==
 Turn 1
@@ -86,98 +110,74 @@ Turn 1
 Turn 2
   player: SPECIES_KINGDRA_MEGA HP 235/235 status none
   opponent: SPECIES_METAGROSS HP 243/243 status none stages spa+1
-  our choice: MOVE_RAIN_DANCE
-  trace: support:weather MOVE_RAIN_DANCE
+  our choice: SWITCH -> SPECIES_MR_MIME
+  trace: team:sacrifice -> 3
   AI action: USE_MOVE MOVE_PSYCHOKINETIC_SLAM
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=155 attackerDamage=51 fainted=[] statusApplied=none
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
-Turn 3
-  player: SPECIES_KINGDRA_MEGA HP 80/235 status none
-  opponent: SPECIES_METAGROSS_MEGA HP 192/243 status none stages spa+1
-  our choice: SWITCH -> SPECIES_KAIOSEA
-  trace: support:switch
-  AI action: USE_MOVE MOVE_METEOR_MASH
   action: battler=0 action=SWITCH missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=62 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=156 attackerDamage=52 fainted=[] statusApplied=none
+Turn 3
+  player: SPECIES_MR_MIME HP 87/229 status none
+  opponent: SPECIES_METAGROSS_MEGA HP 191/243 status none stages spa+1
+  our choice: MOVE_MOONBLAST
+  trace: team:sacrifice MOVE_MOONBLAST
+  AI action: USE_MOVE MOVE_METEOR_MASH
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=240 attackerDamage=- fainted=[0] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
 Turn 4
-  player: SPECIES_KAIOSEA HP 213/259 status none
-  opponent: SPECIES_METAGROSS_MEGA HP 192/243 status none stages atk+1,spa+1
+  player: SPECIES_KINGDRA_MEGA HP 235/235 status none
+  opponent: SPECIES_METAGROSS_MEGA HP 191/243 status none stages spa+1
+  our choice: SWITCH -> SPECIES_KAIOSEA
+  trace: team:sacrifice -> 1
+  AI action: USE_MOVE MOVE_PSYCHOKINETIC_SLAM
+  action: battler=0 action=SWITCH missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=231 attackerDamage=77 fainted=[] statusApplied=none
+Turn 5
+  player: SPECIES_KAIOSEA HP 44/259 status none
+  opponent: SPECIES_METAGROSS_MEGA HP 114/243 status none stages spa+1
   our choice: MOVE_AQUA_BASH
   trace: attacker:damage MOVE_AQUA_BASH
   AI action: USE_MOVE MOVE_HAMMER_ARM
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=181 attackerDamage=- fainted=[] statusApplied=none
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=130 attackerDamage=- fainted=[] statusApplied=none
-Turn 5
-  player: SPECIES_KAIOSEA HP 144/259 status none
-  opponent: SPECIES_METAGROSS_MEGA HP 11/243 status none stages atk+1,spa+1
-  our choice: MOVE_AQUA_BASH
-  trace: attacker:ko MOVE_AQUA_BASH
-  AI action: USE_MOVE MOVE_METEOR_MASH
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=175 attackerDamage=- fainted=[1] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=114 attackerDamage=- fainted=[1] statusApplied=none
   action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
 Turn 6
-  player: SPECIES_KAIOSEA HP 162/259 status none
+  player: SPECIES_KAIOSEA HP 88/259 status none
   opponent: SPECIES_KARTANA_FALLEN HP 370/370 status none
-  our choice: SWITCH -> SPECIES_SCYTHER_MEGA
-  trace: team:counter -> 4
-  AI action: USE_MOVE MOVE_LEAF_BLADE
-  action: battler=0 action=SWITCH missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=66 attackerDamage=- fainted=[] statusApplied=none
+  our choice: MOVE_AQUA_BASH
+  trace: team:sacrifice MOVE_AQUA_BASH
+  AI action: USE_MOVE MOVE_AQUA_CUTTER
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=64 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=85 attackerDamage=- fainted=[] statusApplied=none
 Turn 7
-  player: SPECIES_SCYTHER_MEGA HP 161/227 status none
-  opponent: SPECIES_KARTANA_FALLEN HP 370/370 status none
-  our choice: MOVE_FURY_CUTTER
-  trace: attacker:damage MOVE_FURY_CUTTER
-  AI action: USE_MOVE MOVE_AQUA_CUTTER
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=222 attackerDamage=- fainted=[] statusApplied=none
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=244 attackerDamage=- fainted=[0] statusApplied=none
-Turn 8
-  player: SPECIES_KAIOSEA HP 162/259 status none
-  opponent: SPECIES_KARTANA_FALLEN HP 148/370 status none stages atk+1
+  player: SPECIES_KAIOSEA HP 35/259 status none
+  opponent: SPECIES_KARTANA_FALLEN HP 306/370 status none
   our choice: MOVE_AQUA_BASH
-  trace: attacker:damage MOVE_AQUA_BASH
-  AI action: USE_MOVE MOVE_AQUA_CUTTER
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=99 attackerDamage=- fainted=[] statusApplied=none
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=183 attackerDamage=- fainted=[] statusApplied=none
-Turn 9
-  player: SPECIES_KAIOSEA HP 19/259 status none
-  opponent: SPECIES_KARTANA_FALLEN HP 49/370 status none stages atk+1
-  our choice: MOVE_AQUA_BASH
-  trace: attacker:ko MOVE_AQUA_BASH
+  trace: team:sacrifice MOVE_AQUA_BASH
   AI action: USE_MOVE MOVE_LEAF_BLADE
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=96 attackerDamage=- fainted=[1] statusApplied=none
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
-Turn 10
-  player: SPECIES_KAIOSEA HP 47/259 status none
-  opponent: SPECIES_ZACIAN_CROWNED_SWORD HP 262/262 status none stages atk+1
-  our choice: MOVE_AQUA_BASH
-  trace: attacker:damage MOVE_AQUA_BASH
-  AI action: USE_MOVE MOVE_DIAMOND_BLADE
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=533 attackerDamage=- fainted=[0] statusApplied=none
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
-Turn 11
-  player: SPECIES_SOPRANICE HP 235/235 status none
-  opponent: SPECIES_ZACIAN_CROWNED_SWORD HP 262/262 status none stages atk+1
-  our choice: MOVE_BOOMBURST
-  trace: attacker:damage MOVE_BOOMBURST
-  AI action: USE_MOVE MOVE_DIAMOND_BLADE
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=468 attackerDamage=- fainted=[0] statusApplied=none
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
-Turn 12
-  player: SPECIES_MR_MIME HP 229/229 status none
-  opponent: SPECIES_ZACIAN_CROWNED_SWORD HP 262/262 status none stages atk+1
-  our choice: MOVE_BATON_PASS (switchTo 0: SPECIES_KINGDRA_MEGA)
-  trace: support:pivot MOVE_BATON_PASS
-  AI action: USE_MOVE MOVE_BEHEMOTH_BLADE
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=425 attackerDamage=- fainted=[0] statusApplied=none
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
-Turn 13
-  player: SPECIES_KINGDRA_MEGA HP 80/235 status none
-  opponent: SPECIES_ZACIAN_CROWNED_SWORD HP 262/262 status none stages atk+1
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=62 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=327 attackerDamage=- fainted=[0] statusApplied=none
+Turn 8
+  player: SPECIES_SCYTHER_MEGA HP 227/227 status none
+  opponent: SPECIES_KARTANA_FALLEN HP 244/370 status none stages atk+1
+  our choice: MOVE_FURY_CUTTER
+  trace: team:sacrifice MOVE_FURY_CUTTER
+  AI action: USE_MOVE MOVE_AQUA_CUTTER
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=204 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=346 attackerDamage=- fainted=[0] statusApplied=none
+Turn 9
+  player: SPECIES_KINGDRA_MEGA HP 235/235 status none
+  opponent: SPECIES_KARTANA_FALLEN HP 40/370 status none stages atk+2
   our choice: MOVE_RAIN_DANCE
   trace: support:weather MOVE_RAIN_DANCE
-  AI action: USE_MOVE MOVE_LEECH_BLADE
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=183 attackerDamage=- fainted=[0] statusApplied=none
+  AI action: USE_MOVE MOVE_LEAF_BLADE
   action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
-Outcome: LOST in 13 turns
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=347 attackerDamage=- fainted=[0] statusApplied=none
+Turn 10
+  player: SPECIES_SOPRANICE HP 235/235 status none
+  opponent: SPECIES_KARTANA_FALLEN HP 40/370 status none stages atk+3
+  our choice: MOVE_BOOMBURST
+  trace: attacker:ko MOVE_BOOMBURST
+  AI action: USE_MOVE MOVE_EXCALIBUR
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=1929 attackerDamage=- fainted=[0] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Outcome: LOST in 10 turns

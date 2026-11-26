@@ -2,166 +2,134 @@
 Turn 1
   player: SPECIES_SOPRANICE HP 235/235 status none
   opponent: SPECIES_DIALGA_ORIGIN HP 325/325 status none
-  our choice: SWITCH -> SPECIES_KINGDRA_MEGA
-  trace: team:support -> 0
+  our choice: MOVE_BOOMBURST
+  trace: attacker:damage MOVE_BOOMBURST
   AI action: USE_MOVE MOVE_STEEL_BEAM
-  action: battler=0 action=SWITCH missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=79 attackerDamage=162 fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=263 attackerDamage=131 fainted=[] statusApplied=INFATUATION->1
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=273 attackerDamage=162 fainted=[0,1] statusApplied=none
 Turn 2
-  player: SPECIES_KINGDRA_MEGA HP 156/235 status none
-  opponent: SPECIES_DIALGA_ORIGIN HP 163/325 status none
-  our choice: MOVE_RAIN_DANCE
-  trace: support:weather MOVE_RAIN_DANCE
-  AI action: USE_MOVE MOVE_STEEL_BEAM
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=156 attackerDamage=162 fainted=[0] statusApplied=none
+  player: SPECIES_KINGDRA_MEGA HP 235/235 status none
+  opponent: SPECIES_KORAIDON HP 275/275 status none
+  our choice: SWITCH -> SPECIES_MR_MIME
+  trace: team:sacrifice -> 3
+  AI action: USE_MOVE MOVE_DRACONIC_FANGS
+  action: battler=0 action=SWITCH missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=0 attackerDamage=- fainted=[] statusApplied=none
 Turn 3
-  player: SPECIES_SOPRANICE HP 235/235 status none
-  opponent: SPECIES_DIALGA_ORIGIN HP 1/325 status none
-  our choice: MOVE_BOOMBURST
-  trace: attacker:ko MOVE_BOOMBURST
-  AI action: USE_MOVE MOVE_STEEL_BEAM
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=243 attackerDamage=1 fainted=[1] statusApplied=none
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  player: SPECIES_MR_MIME HP 229/229 status none
+  opponent: SPECIES_KORAIDON HP 275/275 status none
+  our choice: MOVE_MOONBLAST
+  trace: team:sacrifice MOVE_MOONBLAST
+  AI action: USE_MOVE MOVE_SACRED_FIRE
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=265 attackerDamage=- fainted=[0] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
 Turn 4
-  player: SPECIES_SOPRANICE HP 234/235 status none
-  opponent: SPECIES_RAYQUAZA HP 282/282 status none
-  our choice: MOVE_BOOMBURST
-  trace: attacker:ko MOVE_BOOMBURST
-  AI action: USE_MOVE MOVE_DRACONIC_FANGS
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=383 attackerDamage=28 fainted=[0] statusApplied=none
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
-Turn 5
   player: SPECIES_STARMIE_MEGA HP 211/211 status none
-  opponent: SPECIES_RAYQUAZA HP 254/282 status none
-  our choice: MOVE_ICE_SPINNER
-  trace: attacker:ko MOVE_ICE_SPINNER
+  opponent: SPECIES_KORAIDON HP 275/275 status none
+  our choice: MOVE_PSYCHOKINETIC_SLAM
+  trace: attacker:ko MOVE_PSYCHOKINETIC_SLAM
   AI action: USE_MOVE MOVE_DRACONIC_FANGS
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=283 attackerDamage=28 fainted=[0] statusApplied=none
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
-Turn 6
-  player: SPECIES_KAIOSEA HP 259/259 status none
-  opponent: SPECIES_RAYQUAZA HP 226/282 status none
-  our choice: MOVE_SHOCKING_JAB
-  trace: attacker:damage MOVE_SHOCKING_JAB
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=159 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=538 attackerDamage=91 fainted=[1,0] statusApplied=none
+Turn 5
+  player: SPECIES_KINGDRA_MEGA HP 235/235 status none
+  opponent: SPECIES_RAYQUAZA HP 282/282 status none
+  our choice: SWITCH -> SPECIES_KAIOSEA
+  trace: team:sacrifice -> 1
   AI action: USE_MOVE MOVE_DRACONIC_FANGS
+  action: battler=0 action=SWITCH missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
   action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=187 attackerDamage=28 fainted=[] statusApplied=none
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=135 attackerDamage=- fainted=[] statusApplied=none
-Turn 7
-  player: SPECIES_KAIOSEA HP 121/259 status none
-  opponent: SPECIES_RAYQUAZA HP 63/282 status none
+Turn 6
+  player: SPECIES_KAIOSEA HP 88/259 status none
+  opponent: SPECIES_RAYQUAZA HP 254/282 status none
   our choice: MOVE_SHOCKING_JAB
-  trace: attacker:ko MOVE_SHOCKING_JAB
-  AI action: USE_MOVE MOVE_EXTREME_SPEED
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=156 attackerDamage=28 fainted=[0] statusApplied=none
+  trace: team:sacrifice MOVE_SHOCKING_JAB
+  AI action: USE_MOVE MOVE_DRACONIC_FANGS
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=371 attackerDamage=28 fainted=[0] statusApplied=none
   action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 7
+  player: SPECIES_KINGDRA_MEGA HP 235/235 status none
+  opponent: SPECIES_RAYQUAZA HP 226/282 status none
+  our choice: MOVE_DRAGON_PULSE
+  trace: team:sacrifice MOVE_DRAGON_PULSE
+  AI action: USE_MOVE MOVE_DRACONIC_FANGS
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=277 attackerDamage=28 fainted=[0] statusApplied=none
   action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
 Turn 8
-  player: SPECIES_MR_MIME HP 229/229 status none
-  opponent: SPECIES_RAYQUAZA HP 35/282 status none
-  our choice: MOVE_BATON_PASS (switchTo 4: SPECIES_SCYTHER_MEGA)
-  trace: support:pivot MOVE_BATON_PASS
-  AI action: USE_MOVE MOVE_V_CREATE
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=276 attackerDamage=28 fainted=[0] statusApplied=none
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
-Turn 9
   player: SPECIES_SCYTHER_MEGA HP 227/227 status none
-  opponent: SPECIES_RAYQUAZA HP 7/282 status none stages def-1,spe-1,spd-1
-  our choice: MOVE_FURY_CUTTER
-  trace: attacker:ko MOVE_FURY_CUTTER
-  AI action: USE_MOVE MOVE_DRACONIC_FANGS
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=56 attackerDamage=- fainted=[1] statusApplied=none
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
-Turn 10
-  player: SPECIES_SCYTHER_MEGA HP 227/227 status none
-  opponent: SPECIES_KYUREM_BLACK HP 314/314 status none
+  opponent: SPECIES_RAYQUAZA HP 198/282 status none
   our choice: MOVE_FURY_CUTTER
   trace: attacker:damage MOVE_FURY_CUTTER
-  AI action: USE_MOVE MOVE_EXTREME_SPEED
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=357 attackerDamage=- fainted=[0] statusApplied=none
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
-Outcome: LOST in 10 turns
+  AI action: USE_MOVE MOVE_DRAGON_ASCENT
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=156 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=659 attackerDamage=28 fainted=[0] statusApplied=none
+Outcome: LOST in 8 turns
 
 == TRAINER_DRAKE-attack role game 2 seed 2000 ==
 Turn 1
   player: SPECIES_SOPRANICE HP 235/235 status none
   opponent: SPECIES_DIALGA_ORIGIN HP 325/325 status none
-  our choice: SWITCH -> SPECIES_KINGDRA_MEGA
-  trace: team:support -> 0
+  our choice: MOVE_BOOMBURST
+  trace: attacker:damage MOVE_BOOMBURST
   AI action: USE_MOVE MOVE_STEEL_BEAM
-  action: battler=0 action=SWITCH missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=76 attackerDamage=162 fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=252 attackerDamage=126 fainted=[] statusApplied=INFATUATION->1
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=248 attackerDamage=162 fainted=[0,1] statusApplied=none
 Turn 2
-  player: SPECIES_KINGDRA_MEGA HP 159/235 status none
-  opponent: SPECIES_DIALGA_ORIGIN HP 163/325 status none
-  our choice: MOVE_RAIN_DANCE
-  trace: support:weather MOVE_RAIN_DANCE
-  AI action: USE_MOVE MOVE_ROAR_OF_TIME
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=448 attackerDamage=- fainted=[0] statusApplied=none
-Turn 3
-  player: SPECIES_KAIOSEA HP 259/259 status none
-  opponent: SPECIES_DIALGA_ORIGIN HP 163/325 status none
-  our choice: MOVE_AQUA_BASH
-  trace: attacker:damage MOVE_AQUA_BASH
-  AI action: USE_MOVE MOVE_ROAR_OF_TIME
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=89 attackerDamage=- fainted=[] statusApplied=none
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=95 attackerDamage=- fainted=[] statusApplied=none
-Turn 4
-  player: SPECIES_KAIOSEA HP 180/259 status none
-  opponent: SPECIES_DIALGA_ORIGIN HP 74/325 status none
-  our choice: MOVE_AQUA_BASH
-  trace: attacker:damage MOVE_AQUA_BASH
-  AI action: USE_MOVE MOVE_ROAR_OF_TIME
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=46 attackerDamage=- fainted=[] statusApplied=none
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=212 attackerDamage=- fainted=[0] statusApplied=none
-Turn 5
-  player: SPECIES_SOPRANICE HP 235/235 status none
-  opponent: SPECIES_DIALGA_ORIGIN HP 28/325 status none
-  our choice: MOVE_BOOMBURST
-  trace: attacker:ko MOVE_BOOMBURST
-  AI action: USE_MOVE MOVE_STEEL_BEAM
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=263 attackerDamage=14 fainted=[1] statusApplied=none
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
-Turn 6
-  player: SPECIES_SOPRANICE HP 221/235 status none
-  opponent: SPECIES_RAYQUAZA HP 282/282 status none
-  our choice: MOVE_BOOMBURST
-  trace: attacker:ko MOVE_BOOMBURST
+  player: SPECIES_KINGDRA_MEGA HP 235/235 status none
+  opponent: SPECIES_KORAIDON HP 275/275 status none
+  our choice: SWITCH -> SPECIES_MR_MIME
+  trace: team:sacrifice -> 3
   AI action: USE_MOVE MOVE_DRACONIC_FANGS
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=399 attackerDamage=28 fainted=[0] statusApplied=none
+  action: battler=0 action=SWITCH missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=0 attackerDamage=- fainted=[] statusApplied=none
+Turn 3
+  player: SPECIES_MR_MIME HP 229/229 status none
+  opponent: SPECIES_KORAIDON HP 275/275 status none
+  our choice: MOVE_MOONBLAST
+  trace: team:sacrifice MOVE_MOONBLAST
+  AI action: USE_MOVE MOVE_SACRED_FIRE
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=283 attackerDamage=- fainted=[0] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+Turn 4
+  player: SPECIES_STARMIE_MEGA HP 211/211 status none
+  opponent: SPECIES_KORAIDON HP 275/275 status none
+  our choice: MOVE_PSYCHOKINETIC_SLAM
+  trace: attacker:ko MOVE_PSYCHOKINETIC_SLAM
+  AI action: USE_MOVE MOVE_DRACONIC_FANGS
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=159 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=516 attackerDamage=91 fainted=[1,0] statusApplied=none
+Turn 5
+  player: SPECIES_KINGDRA_MEGA HP 235/235 status none
+  opponent: SPECIES_RAYQUAZA HP 282/282 status none
+  our choice: SWITCH -> SPECIES_KAIOSEA
+  trace: team:sacrifice -> 1
+  AI action: USE_MOVE MOVE_DRACONIC_FANGS
+  action: battler=0 action=SWITCH missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=189 attackerDamage=28 fainted=[] statusApplied=none
+Turn 6
+  player: SPECIES_KAIOSEA HP 86/259 status none
+  opponent: SPECIES_RAYQUAZA HP 254/282 status none
+  our choice: MOVE_SHOCKING_JAB
+  trace: team:sacrifice MOVE_SHOCKING_JAB
+  AI action: USE_MOVE MOVE_DRACONIC_FANGS
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=367 attackerDamage=28 fainted=[0] statusApplied=none
   action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
 Turn 7
-  player: SPECIES_STARMIE_MEGA HP 211/211 status none
-  opponent: SPECIES_RAYQUAZA HP 254/282 status none
-  our choice: MOVE_ICE_SPINNER
-  trace: attacker:ko MOVE_ICE_SPINNER
-  AI action: USE_MOVE MOVE_DRAGON_ASCENT
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=277 attackerDamage=28 fainted=[0] statusApplied=none
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  player: SPECIES_KINGDRA_MEGA HP 235/235 status none
+  opponent: SPECIES_RAYQUAZA HP 226/282 status none
+  our choice: MOVE_DRAGON_PULSE
+  trace: team:sacrifice MOVE_DRAGON_PULSE
+  AI action: USE_MOVE MOVE_DRACONIC_FANGS
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=306 attackerDamage=28 fainted=[0] statusApplied=none
   action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
 Turn 8
-  player: SPECIES_MR_MIME HP 229/229 status none
-  opponent: SPECIES_RAYQUAZA HP 226/282 status none stages def-1,spd-1
-  our choice: MOVE_BATON_PASS (switchTo 4: SPECIES_SCYTHER_MEGA)
-  trace: support:pivot MOVE_BATON_PASS
-  AI action: USE_MOVE MOVE_V_CREATE
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=267 attackerDamage=28 fainted=[0] statusApplied=none
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
-Turn 9
   player: SPECIES_SCYTHER_MEGA HP 227/227 status none
-  opponent: SPECIES_RAYQUAZA HP 198/282 status none stages def-2,spe-1,spd-2
-  our choice: MOVE_FURY_CUTTER
-  trace: attacker:ko MOVE_FURY_CUTTER
-  AI action: USE_MOVE MOVE_EXTREME_SPEED
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=236 attackerDamage=- fainted=[1] statusApplied=none
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
-Turn 10
-  player: SPECIES_SCYTHER_MEGA HP 227/227 status none
-  opponent: SPECIES_KYUREM_BLACK HP 314/314 status none
+  opponent: SPECIES_RAYQUAZA HP 198/282 status none
   our choice: MOVE_FURY_CUTTER
   trace: attacker:damage MOVE_FURY_CUTTER
-  AI action: USE_MOVE MOVE_EXTREME_SPEED
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=354 attackerDamage=- fainted=[0] statusApplied=none
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
-Outcome: LOST in 10 turns
+  AI action: USE_MOVE MOVE_V_CREATE
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=717 attackerDamage=28 fainted=[0] statusApplied=none
+Outcome: LOST in 8 turns

@@ -19,7 +19,7 @@ Turn 3
   player: SPECIES_KAIOSEA HP 259/259 status none
   opponent: SPECIES_GIRATINA_ORIGIN HP 392/392 status none
   our choice: MOVE_DRILL_PECK
-  trace: attacker:damage MOVE_DRILL_PECK
+  trace: team:sacrifice MOVE_DRILL_PECK
   AI action: USE_MOVE MOVE_SHADOW_BALL
   action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=78 attackerDamage=- fainted=[] statusApplied=none
   action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=72 attackerDamage=- fainted=[] statusApplied=none
@@ -27,7 +27,7 @@ Turn 4
   player: SPECIES_KAIOSEA HP 203/259 status none stages spd-1
   opponent: SPECIES_GIRATINA_ORIGIN HP 314/392 status none
   our choice: MOVE_DRILL_PECK
-  trace: attacker:damage MOVE_DRILL_PECK
+  trace: team:sacrifice MOVE_DRILL_PECK
   AI action: USE_MOVE MOVE_SHADOW_BALL
   action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=159 attackerDamage=- fainted=[] statusApplied=none
   action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=209 attackerDamage=- fainted=[] statusApplied=none
@@ -43,7 +43,7 @@ Turn 6
   player: SPECIES_KAIOSEA HP 103/259 status none stages spd-2
   opponent: SPECIES_NECROZMA_DAWN_WINGS HP 320/320 status none
   our choice: MOVE_AQUA_BASH
-  trace: attacker:damage MOVE_AQUA_BASH
+  trace: team:sacrifice MOVE_AQUA_BASH
   AI action: USE_MOVE MOVE_DARK_PULSE
   action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=78 attackerDamage=- fainted=[] statusApplied=none
   action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=393 attackerDamage=- fainted=[0] statusApplied=none
@@ -58,18 +58,19 @@ Turn 7
 Turn 8
   player: SPECIES_SOPRANICE HP 235/235 status none
   opponent: SPECIES_HOUNDOOM_REDUX HP 235/235 status none
-  our choice: MOVE_REQUIEM
-  trace: attacker:ko MOVE_REQUIEM
+  our choice: SWITCH -> SPECIES_MR_MIME
+  trace: team:sacrifice -> 3
   AI action: USE_MOVE MOVE_RAGING_SOULS
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=541 attackerDamage=- fainted=[0] statusApplied=none
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=SWITCH missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=323 attackerDamage=- fainted=[0] statusApplied=none
 Turn 9
   player: SPECIES_SCYTHER_MEGA HP 227/227 status none
   opponent: SPECIES_HOUNDOOM_MEGA_REDUX HP 212/235 status none stages spa+2
   our choice: MOVE_FURY_SWIPES
   trace: attacker:ko MOVE_FURY_SWIPES
-  AI action: USE_MOVE MOVE_OVERHEAT
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=245 attackerDamage=- fainted=[1] statusApplied=none
+  AI action: USE_MOVE MOVE_RAGING_SOULS
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=277 attackerDamage=- fainted=[1] statusApplied=none
   action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
 Turn 10
   player: SPECIES_SCYTHER_MEGA HP 171/227 status none
@@ -77,16 +78,16 @@ Turn 10
   our choice: MOVE_FURY_SWIPES
   trace: attacker:ko MOVE_FURY_SWIPES
   AI action: USE_MOVE MOVE_AXE_KICK
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=770 attackerDamage=- fainted=[1] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=786 attackerDamage=- fainted=[1] statusApplied=none
   action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=70 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=69 attackerDamage=- fainted=[] statusApplied=none
 Turn 11
-  player: SPECIES_SCYTHER_MEGA HP 45/227 status none
+  player: SPECIES_SCYTHER_MEGA HP 46/227 status none
   opponent: SPECIES_MARSHADOW HP 259/259 status none
   our choice: MOVE_FURY_SWIPES
   trace: attacker:ko MOVE_FURY_SWIPES
   AI action: USE_MOVE MOVE_SURGING_STRIKES
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=443 attackerDamage=- fainted=[1] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=402 attackerDamage=- fainted=[1] statusApplied=none
   action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
 Turn 12
   player: SPECIES_STARMIE_MEGA HP 211/211 status none
@@ -94,7 +95,7 @@ Turn 12
   our choice: MOVE_WAVE_CRASH
   trace: attacker:ko MOVE_WAVE_CRASH
   AI action: USE_MOVE MOVE_LAST_RESPECTS
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=535 attackerDamage=89 fainted=[1] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=512 attackerDamage=89 fainted=[1] statusApplied=none
   action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
 Outcome: WON in 12 turns
 
@@ -119,7 +120,7 @@ Turn 3
   player: SPECIES_KAIOSEA HP 259/259 status none
   opponent: SPECIES_GIRATINA_ORIGIN HP 392/392 status none
   our choice: MOVE_DRILL_PECK
-  trace: attacker:damage MOVE_DRILL_PECK
+  trace: team:sacrifice MOVE_DRILL_PECK
   AI action: USE_MOVE MOVE_SHADOW_BALL
   action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=81 attackerDamage=- fainted=[] statusApplied=none
   action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=65 attackerDamage=- fainted=[] statusApplied=none
@@ -127,7 +128,7 @@ Turn 4
   player: SPECIES_KAIOSEA HP 210/259 status none stages spd-1
   opponent: SPECIES_GIRATINA_ORIGIN HP 311/392 status none
   our choice: MOVE_DRILL_PECK
-  trace: attacker:damage MOVE_DRILL_PECK
+  trace: team:sacrifice MOVE_DRILL_PECK
   AI action: USE_MOVE MOVE_SHADOW_BALL
   action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=146 attackerDamage=- fainted=[] statusApplied=none
   action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=207 attackerDamage=- fainted=[] statusApplied=none
@@ -135,7 +136,7 @@ Turn 5
   player: SPECIES_KAIOSEA HP 55/259 status none stages spd-1
   opponent: SPECIES_GIRATINA_ORIGIN HP 165/392 status none
   our choice: MOVE_DRILL_PECK
-  trace: attacker:damage MOVE_DRILL_PECK
+  trace: team:sacrifice MOVE_DRILL_PECK
   AI action: USE_MOVE MOVE_SHADOW_BALL
   action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=166 attackerDamage=- fainted=[1] statusApplied=none
   action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
@@ -143,7 +144,7 @@ Turn 6
   player: SPECIES_KAIOSEA HP 112/259 status none stages spd-1
   opponent: SPECIES_NECROZMA_DAWN_WINGS HP 320/320 status none
   our choice: MOVE_AQUA_BASH
-  trace: attacker:damage MOVE_AQUA_BASH
+  trace: team:sacrifice MOVE_AQUA_BASH
   AI action: USE_MOVE MOVE_DARK_PULSE
   action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=80 attackerDamage=- fainted=[] statusApplied=none
   action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=279 attackerDamage=- fainted=[0] statusApplied=none
@@ -158,18 +159,19 @@ Turn 7
 Turn 8
   player: SPECIES_SOPRANICE HP 235/235 status none
   opponent: SPECIES_HOUNDOOM_REDUX HP 235/235 status none
-  our choice: MOVE_REQUIEM
-  trace: attacker:ko MOVE_REQUIEM
+  our choice: SWITCH -> SPECIES_MR_MIME
+  trace: team:sacrifice -> 3
   AI action: USE_MOVE MOVE_RAGING_SOULS
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=502 attackerDamage=- fainted=[0] statusApplied=none
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=SWITCH missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=true cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=372 attackerDamage=- fainted=[0] statusApplied=none
 Turn 9
   player: SPECIES_SCYTHER_MEGA HP 227/227 status none
   opponent: SPECIES_HOUNDOOM_MEGA_REDUX HP 212/235 status none stages spa+2
   our choice: MOVE_FURY_SWIPES
   trace: attacker:ko MOVE_FURY_SWIPES
-  AI action: USE_MOVE MOVE_RAGING_SOULS
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=333 attackerDamage=- fainted=[1] statusApplied=none
+  AI action: USE_MOVE MOVE_OVERHEAT
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=331 attackerDamage=- fainted=[1] statusApplied=none
   action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
 Turn 10
   player: SPECIES_SCYTHER_MEGA HP 171/227 status none
@@ -177,16 +179,16 @@ Turn 10
   our choice: MOVE_FURY_SWIPES
   trace: attacker:ko MOVE_FURY_SWIPES
   AI action: USE_MOVE MOVE_TRIPLE_AXEL
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=820 attackerDamage=- fainted=[1] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=711 attackerDamage=- fainted=[1] statusApplied=none
   action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
-  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=72 attackerDamage=- fainted=[] statusApplied=none
+  action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=73 attackerDamage=- fainted=[] statusApplied=none
 Turn 11
-  player: SPECIES_SCYTHER_MEGA HP 43/227 status none
+  player: SPECIES_SCYTHER_MEGA HP 42/227 status none
   opponent: SPECIES_MARSHADOW HP 259/259 status none
   our choice: MOVE_FURY_SWIPES
   trace: attacker:ko MOVE_FURY_SWIPES
   AI action: USE_MOVE MOVE_SURGING_STRIKES
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=454 attackerDamage=- fainted=[1] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=380 attackerDamage=- fainted=[1] statusApplied=none
   action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
 Turn 12
   player: SPECIES_STARMIE_MEGA HP 211/211 status none
@@ -194,6 +196,6 @@ Turn 12
   our choice: MOVE_WAVE_CRASH
   trace: attacker:ko MOVE_WAVE_CRASH
   AI action: USE_MOVE MOVE_LAST_RESPECTS
-  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=494 attackerDamage=89 fainted=[1] statusApplied=none
+  action: battler=0 action=USE_MOVE missed=false cancelledBy=none targetDamage=535 attackerDamage=89 fainted=[1] statusApplied=none
   action: battler=1 action=USE_MOVE missed=false cancelledBy=none targetDamage=- attackerDamage=- fainted=[] statusApplied=none
 Outcome: WON in 12 turns

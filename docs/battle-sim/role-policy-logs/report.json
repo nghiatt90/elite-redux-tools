@@ -11,23 +11,45 @@
       "kind": "attack",
       "role": {
         "policy": "role",
-        "wins": 1,
+        "wins": 0,
         "games": 80,
-        "rate": 0.0125,
-        "lower": 0.002209918618306224,
-        "upper": 0.06746432423965451,
-        "msPerGame": 1009.8068023124997,
+        "rate": 0,
+        "lower": -3.469446951953614e-18,
+        "upper": 0.0458197362645751,
+        "msPerGame": 984.9902805750014,
         "capped": 0,
-        "available": 155,
+        "available": 87,
         "used": 0,
         "boosted": 0,
         "attackedWhileBoosted": 0,
-        "positiveStage": 9,
+        "positiveStage": 0,
         "aiSwitches": 0,
         "aiSwitchByThing": {},
         "batonBoostFired": 0,
         "batonBoostPasses": 0,
-        "batonBoostReceived": 0
+        "batonBoostReceived": 0,
+        "teamSwitches": {
+          "preserve": 0,
+          "sacrifice": 133,
+          "counter": 0,
+          "entryAbility": 0,
+          "support": 0,
+          "ppLoop": 0
+        },
+        "teamTurnsWithoutSwitch": {
+          "preserve": 0,
+          "sacrifice": 421,
+          "counter": 0,
+          "entryAbility": 0,
+          "support": 0,
+          "ppLoop": 0
+        },
+        "teamStayTurns": 275,
+        "teamStayOutspeedTurns": 192,
+        "teamStayPreserveFired": 0,
+        "turn1Actions": {
+          "MOVE_FURY_CUTTER": 80
+        }
       },
       "expectimax": {
         "policy": "expectimax",
@@ -36,7 +58,7 @@
         "rate": 0.8875,
         "lower": 0.7998158913432244,
         "upper": 0.9396738130517298,
-        "msPerGame": 1973.3457197500018,
+        "msPerGame": 2145.200825850002,
         "capped": 0,
         "available": 298,
         "used": 100,
@@ -60,14 +82,14 @@
       "kind": "attack",
       "role": {
         "policy": "role",
-        "wins": 60,
+        "wins": 58,
         "games": 80,
-        "rate": 0.75,
-        "lower": 0.6451511899886556,
-        "upper": 0.8319389418790569,
-        "msPerGame": 1102.0524305375,
+        "rate": 0.725,
+        "lower": 0.618557347158301,
+        "upper": 0.8108237715226401,
+        "msPerGame": 1104.2225552749965,
         "capped": 0,
-        "available": 40,
+        "available": 21,
         "used": 0,
         "boosted": 0,
         "attackedWhileBoosted": 0,
@@ -76,7 +98,29 @@
         "aiSwitchByThing": {},
         "batonBoostFired": 0,
         "batonBoostPasses": 0,
-        "batonBoostReceived": 0
+        "batonBoostReceived": 0,
+        "teamSwitches": {
+          "preserve": 0,
+          "sacrifice": 96,
+          "counter": 0,
+          "entryAbility": 0,
+          "support": 0,
+          "ppLoop": 0
+        },
+        "teamTurnsWithoutSwitch": {
+          "preserve": 0,
+          "sacrifice": 315,
+          "counter": 0,
+          "entryAbility": 0,
+          "support": 0,
+          "ppLoop": 0
+        },
+        "teamStayTurns": 442,
+        "teamStayOutspeedTurns": 442,
+        "teamStayPreserveFired": 0,
+        "turn1Actions": {
+          "MOVE_RAIN_DANCE": 80
+        }
       },
       "expectimax": {
         "policy": "expectimax",
@@ -85,7 +129,7 @@
         "rate": 0.1875,
         "lower": 0.11705207812728378,
         "upper": 0.2865852570380757,
-        "msPerGame": 1615.122683550001,
+        "msPerGame": 1734.6557223,
         "capped": 0,
         "available": 276,
         "used": 4,
@@ -114,20 +158,44 @@
         "rate": 0,
         "lower": -3.469446951953614e-18,
         "upper": 0.0458197362645751,
-        "msPerGame": 1115.7403938500006,
+        "msPerGame": 1303.0334110500003,
         "capped": 0,
-        "available": 105,
+        "available": 173,
         "used": 0,
         "boosted": 0,
         "attackedWhileBoosted": 0,
-        "positiveStage": 1,
-        "aiSwitches": 1,
+        "positiveStage": 2,
+        "aiSwitches": 25,
         "aiSwitchByThing": {
-          "MOVE_MOONBLAST": 1
+          "MOVE_SNIPE_SHOT": 19,
+          "SWITCH": 4,
+          "MOVE_BATON_PASS": 2
         },
         "batonBoostFired": 0,
         "batonBoostPasses": 0,
-        "batonBoostReceived": 0
+        "batonBoostReceived": 0,
+        "teamSwitches": {
+          "preserve": 0,
+          "sacrifice": 278,
+          "counter": 78,
+          "entryAbility": 0,
+          "support": 16,
+          "ppLoop": 0
+        },
+        "teamTurnsWithoutSwitch": {
+          "preserve": 0,
+          "sacrifice": 552,
+          "counter": 0,
+          "entryAbility": 0,
+          "support": 0,
+          "ppLoop": 0
+        },
+        "teamStayTurns": 170,
+        "teamStayOutspeedTurns": 144,
+        "teamStayPreserveFired": 0,
+        "turn1Actions": {
+          "SWITCH": 80
+        }
       },
       "expectimax": {
         "policy": "expectimax",
@@ -136,7 +204,7 @@
         "rate": 0,
         "lower": -3.469446951953614e-18,
         "upper": 0.0458197362645751,
-        "msPerGame": 1659.797752975,
+        "msPerGame": 1705.9139844374993,
         "capped": 0,
         "available": 307,
         "used": 38,
@@ -163,25 +231,45 @@
       "kind": "attack",
       "role": {
         "policy": "role",
-        "wins": 1,
+        "wins": 0,
         "games": 80,
-        "rate": 0.0125,
-        "lower": 0.002209918618306224,
-        "upper": 0.06746432423965451,
-        "msPerGame": 904.1314177875001,
+        "rate": 0,
+        "lower": -3.469446951953614e-18,
+        "upper": 0.0458197362645751,
+        "msPerGame": 604.2306963125,
         "capped": 0,
-        "available": 132,
-        "used": 32,
-        "boosted": 32,
+        "available": 80,
+        "used": 0,
+        "boosted": 0,
         "attackedWhileBoosted": 0,
-        "positiveStage": 73,
-        "aiSwitches": 2,
-        "aiSwitchByThing": {
-          "MOVE_SHOCKING_JAB": 2
+        "positiveStage": 0,
+        "aiSwitches": 0,
+        "aiSwitchByThing": {},
+        "batonBoostFired": 0,
+        "batonBoostPasses": 0,
+        "batonBoostReceived": 0,
+        "teamSwitches": {
+          "preserve": 0,
+          "sacrifice": 162,
+          "counter": 0,
+          "entryAbility": 0,
+          "support": 0,
+          "ppLoop": 0
         },
-        "batonBoostFired": 32,
-        "batonBoostPasses": 16,
-        "batonBoostReceived": 16
+        "teamTurnsWithoutSwitch": {
+          "preserve": 0,
+          "sacrifice": 238,
+          "counter": 0,
+          "entryAbility": 0,
+          "support": 0,
+          "ppLoop": 0
+        },
+        "teamStayTurns": 85,
+        "teamStayOutspeedTurns": 1,
+        "teamStayPreserveFired": 0,
+        "turn1Actions": {
+          "MOVE_BOOMBURST": 80
+        }
       },
       "expectimax": {
         "policy": "expectimax",
@@ -190,7 +278,7 @@
         "rate": 0.375,
         "lower": 0.2769401625800477,
         "upper": 0.484514771486096,
-        "msPerGame": 2045.9190290374984,
+        "msPerGame": 2255.356245975001,
         "capped": 0,
         "available": 404,
         "used": 19,
@@ -222,18 +310,43 @@
         "rate": 0,
         "lower": -3.469446951953614e-18,
         "upper": 0.0458197362645751,
-        "msPerGame": 712.8543431,
+        "msPerGame": 816.1332816625018,
         "capped": 0,
-        "available": 72,
+        "available": 87,
         "used": 0,
         "boosted": 0,
         "attackedWhileBoosted": 0,
         "positiveStage": 0,
-        "aiSwitches": 0,
-        "aiSwitchByThing": {},
+        "aiSwitches": 4,
+        "aiSwitchByThing": {
+          "MOVE_BATON_PASS": 2,
+          "MOVE_MOONBLAST": 2
+        },
         "batonBoostFired": 0,
         "batonBoostPasses": 0,
-        "batonBoostReceived": 0
+        "batonBoostReceived": 0,
+        "teamSwitches": {
+          "preserve": 0,
+          "sacrifice": 145,
+          "counter": 1,
+          "entryAbility": 0,
+          "support": 6,
+          "ppLoop": 0
+        },
+        "teamTurnsWithoutSwitch": {
+          "preserve": 0,
+          "sacrifice": 313,
+          "counter": 0,
+          "entryAbility": 0,
+          "support": 0,
+          "ppLoop": 0
+        },
+        "teamStayTurns": 259,
+        "teamStayOutspeedTurns": 151,
+        "teamStayPreserveFired": 0,
+        "turn1Actions": {
+          "MOVE_WAVE_CRASH": 80
+        }
       },
       "expectimax": {
         "policy": "expectimax",
@@ -242,7 +355,7 @@
         "rate": 0,
         "lower": -3.469446951953614e-18,
         "upper": 0.0458197362645751,
-        "msPerGame": 1318.6538917500002,
+        "msPerGame": 1417.5974101999998,
         "capped": 0,
         "available": 202,
         "used": 0,
@@ -266,23 +379,47 @@
       "kind": "stall",
       "role": {
         "policy": "role",
-        "wins": 3,
+        "wins": 0,
         "games": 80,
-        "rate": 0.0375,
-        "lower": 0.012834336300788757,
-        "upper": 0.10454891974394322,
-        "msPerGame": 2602.5258008125006,
-        "capped": 0,
-        "available": 304,
+        "rate": 0,
+        "lower": -3.469446951953614e-18,
+        "upper": 0.0458197362645751,
+        "msPerGame": 2605.662253150012,
+        "capped": 11,
+        "available": 266,
         "used": 0,
         "boosted": 0,
         "attackedWhileBoosted": 0,
-        "positiveStage": 224,
-        "aiSwitches": 0,
-        "aiSwitchByThing": {},
+        "positiveStage": 187,
+        "aiSwitches": 3,
+        "aiSwitchByThing": {
+          "MOVE_SEISMIC_TOSS": 3
+        },
         "batonBoostFired": 0,
         "batonBoostPasses": 0,
-        "batonBoostReceived": 0
+        "batonBoostReceived": 0,
+        "teamSwitches": {
+          "preserve": 0,
+          "sacrifice": 451,
+          "counter": 5,
+          "entryAbility": 0,
+          "support": 0,
+          "ppLoop": 0
+        },
+        "teamTurnsWithoutSwitch": {
+          "preserve": 0,
+          "sacrifice": 1809,
+          "counter": 0,
+          "entryAbility": 0,
+          "support": 0,
+          "ppLoop": 0
+        },
+        "teamStayTurns": 331,
+        "teamStayOutspeedTurns": 141,
+        "teamStayPreserveFired": 0,
+        "turn1Actions": {
+          "MOVE_SAFE_PASSAGE": 80
+        }
       },
       "expectimax": {
         "policy": "expectimax",
@@ -291,7 +428,7 @@
         "rate": 0.0625,
         "lower": 0.026988977697985535,
         "upper": 0.1381032915335177,
-        "msPerGame": 5818.083908787498,
+        "msPerGame": 5876.5319872499995,
         "capped": 0,
         "available": 452,
         "used": 0,
