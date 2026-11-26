@@ -22,7 +22,9 @@ import {
   TEAM_PURPOSES,
   acceptableSwitchIn,
   createTeamLayer,
+  isGoodCounter,
   planDoubleSwitch,
+  scoreBench,
   stayTest,
 } from './driver/teamLayer'
 import type { TeamGenes, TeamPurpose } from './driver/teamLayer'
@@ -240,7 +242,6 @@ describe('cycle s20k - team layer doubleSwitch purpose', () => {
   })
 
   it('case 4: first hit not negligible (> switchInSafety%) gives null plan', () => {
-    // Bench mons are Machamp (Fighting type, takes non-zero damage from Body Slam)
     const playerMachampBench: PlayerMonSpec = {
       species: 'SPECIES_MACHAMP',
       level: 50,
@@ -248,26 +249,53 @@ describe('cycle s20k - team layer doubleSwitch purpose', () => {
     }
     const foeMachamp = mon('SPECIES_MACHAMP', ['MOVE_BODY_SLAM'])
     const s = session(
-      [playerCelebrateLead, playerMachampBench, playerMachampBench],
+      [playerCelebrateLead, playerGengarCounter, playerMachampBench],
       [foeMachamp],
     )
 
-    // Patch bench Machamp HP to 30 so Body Slam removes > 20%
-    patchMon(s.state, 0, 1, { hp: 30 })
-    patchMon(s.state, 0, 2, { hp: 30 })
+    // Calculate Shadow Ball damage against Machamp and patch Machamp HP so 2 * lowest >= hp (as in case 1)
+    const sub = stateWithReserve(s.state, 0, s.state.sides[0].party[1]!, 1)
+    const probe = cloneSession({ ...s, state: sub }, 0)
+    const gengarMoves = evaluateMoves(probe, null).filter((m) => m.moveId === 'MOVE_SHADOW_BALL')
+    expect(gengarMoves.length).toBeGreaterThan(0)
+    const shadowBallRoll = lowestRoll(gengarMoves[0]!.range!)
+    expect(shadowBallRoll).toBeGreaterThan(0)
 
-    const benchRange = rangeOnOurReserve(s, 'MOVE_BODY_SLAM', 1)
-    expect(benchRange).not.toBeNull()
-    const lossPct = (highestRoll(benchRange!) / 30) * 100
-    expect(lossPct).toBeGreaterThan(DEFAULT_TEAM_GENES.switchInSafety)
+    patchMon(s.state, 1, 0, { hp: 2 * shadowBallRoll })
 
     const view = readPredictions(s, DEFAULT_SAFETY_PCT)
+    expect(view.predictedMoveId).toBe('MOVE_BODY_SLAM')
+    expect(view.predictedAction).not.toBeNull()
+
     const genes: TeamGenes = {
       ...DEFAULT_TEAM_GENES,
       purposeFlags: onlyPurpose('doubleSwitch'),
     }
-    const plan = planDoubleSwitch(s, view, genes)
-    expect(plan).toBeNull()
+
+    const hp = s.state.sides[0].party[2]!.hp
+    const range = rangeOnOurReserve(s, 'MOVE_BODY_SLAM', 2)
+    expect(range).not.toBeNull()
+    const high = highestRoll(range!)
+    expect(high).toBeLessThan(hp)
+    const lossPct = (high / hp) * 100
+    expect(high * 100).toBeGreaterThan(DEFAULT_TEAM_GENES.switchInSafety * hp)
+
+    expect(acceptableSwitchIn(s, 2, ['MOVE_BODY_SLAM'], genes)).toBeNull()
+
+    const scored = scoreBench(s, 2, ['MOVE_BODY_SLAM'], genes.switchInSafety)
+    expect(scored).not.toBeNull()
+    expect(isGoodCounter(s, 2, scored!, s.state.battlers[1]!.mon.hp, view.predictedAction)).toBe(true)
+
+    // Plan is null with default switchInSafety
+    expect(planDoubleSwitch(s, view, genes)).toBeNull()
+
+    // Control: relaxed switchInSafety makes plan non-null
+    const controlGenes: TeamGenes = {
+      ...genes,
+      switchInSafety: Math.ceil(lossPct) + 1,
+    }
+    const controlPlan = planDoubleSwitch(s, view, controlGenes)
+    expect(controlPlan).not.toBeNull()
   })
 
   it('case 5: live session state and RNG are unchanged by planDoubleSwitch', () => {
