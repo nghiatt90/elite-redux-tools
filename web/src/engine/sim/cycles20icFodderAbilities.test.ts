@@ -295,13 +295,13 @@ describe('cycle s20ic - team layer fodder: the ability exception', () => {
 
   it('case 6a: an onAbsorb ability is usable only against an absorbed type', () => {
     // Sap Sipper absorbs Grass and raises the highest attacking stat by 1
-    // (src/abilities.cc:2232-2241). Magical Leaf is Grass and non-contact.
-    const grass = fodderFixture([mon('SPECIES_MACHAMP', ['MOVE_MAGICAL_LEAF'])])
+    // (src/abilities.cc:2232-2241). Leafage is Grass and non-contact.
+    const grass = fodderFixture([mon('SPECIES_MACHAMP', ['MOVE_LEAFAGE'])])
     patchMon(grass.s.state, 0, 3, { hp: 165, abilities: abilitySlots('ABILITY_SAP_SIPPER') })
     beginTurn(grass.s)
     const grassView = readPredictions(grass.s, 50)
-    expect(grassView.predictedMoveId).toBe('MOVE_MAGICAL_LEAF')
-    expect(grass.s.data.dataContext.move('MOVE_MAGICAL_LEAF')!.type).toBe('GRASS')
+    expect(grassView.predictedMoveId).toBe('MOVE_LEAFAGE')
+    expect(grass.s.data.dataContext.move('MOVE_LEAFAGE')!.type).toBe('GRASS')
     expect(fodderAbilityTriggers(grass.s, 3, grassView).usable).toContain('ABILITY_SAP_SIPPER')
 
     // A Normal move is not absorbed, so the run must show no gain.

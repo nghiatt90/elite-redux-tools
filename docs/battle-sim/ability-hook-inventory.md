@@ -56,9 +56,9 @@ Move-end branch evidence: 0 of the 144 defined `onAttacker` pairs are listed in 
 | onCrit | 31 | 31 | 0 | 0 | 0 | 28 |
 | onDefender | 122 | 122 | 0 | 0 | 0 | 122 |
 | onDefensiveMultiplier | 102 | 102 | 0 | 0 | 0 | 84 |
-| onDisguise | 3 | 0 | 0 | 3 | 0 | 2 |
+| onDisguise | 3 | 0 | 0 | 3 | 0 | 3 |
 | onEndTurn | 67 | 67 | 0 | 0 | 0 | 66 |
-| onEntry | 225 | 225 | 0 | 0 | 0 | 207 |
+| onEntry | 225 | 225 | 0 | 0 | 0 | 208 |
 | onExit | 12 | 9 | 0 | 3 | 0 | 12 |
 | onImmune | 19 | 19 | 0 | 0 | 0 | 19 |
 | onInfiltrate | 10 | 10 | 0 | 0 | 0 | 10 |
@@ -73,7 +73,7 @@ Move-end branch evidence: 0 of the 144 defined `onAttacker` pairs are listed in 
 | onPriority | 19 | 11 | 0 | 8 | 0 | 14 |
 | onReactive | 18 | 10 | 0 | 8 | 0 | 16 |
 | onRecoil | 5 | 5 | 0 | 0 | 0 | 5 |
-| onRevive | 2 | 1 | 0 | 1 | 0 | 1 |
+| onRevive | 2 | 1 | 0 | 1 | 0 | 2 |
 | onStab | 44 | 44 | 0 | 0 | 0 | 43 |
 | onStat | 63 | 62 | 0 | 1 | 0 | 58 |
 | onStatLowered | 11 | 11 | 0 | 0 | 0 | 8 |
@@ -82,8 +82,8 @@ Move-end branch evidence: 0 of the 144 defined `onAttacker` pairs are listed in 
 | onTerrain | 7 | 7 | 0 | 0 | 0 | 7 |
 | onTrap | 5 | 5 | 0 | 0 | 0 | 5 |
 | onTypeEffectiveness | 22 | 22 | 0 | 0 | 0 | 19 |
-| onWeather | 8 | 8 | 0 | 0 | 0 | 7 |
-| **Total** | **1498** | **1443** | **0** | **55** | **0** | **1383** |
+| onWeather | 8 | 8 | 0 | 0 | 0 | 8 |
+| **Total** | **1498** | **1443** | **0** | **55** | **0** | **1387** |
 
 ## Unported Ability Hook Pairs
 
@@ -132,7 +132,7 @@ Grouped by hook kind, sorted alphabetically. Source lines cite `pipeline/.upstre
 ### onDisguise (3)
 
 - `ABILITY_DISGUISE` (src/abilities.cc:2869) *(ability mentioned in test)*
-- `ABILITY_ICE_FACE` (src/abilities.cc:3362)
+- `ABILITY_ICE_FACE` (src/abilities.cc:3362) *(ability mentioned in test)*
 - `ABILITY_PATCHWORK` (src/abilities.cc:8636) *(ability mentioned in test)*
 
 ### onExit (3)
@@ -165,7 +165,7 @@ Grouped by hook kind, sorted alphabetically. Source lines cite `pipeline/.upstre
 
 ### onRevive (1)
 
-- `ABILITY_BACKUP_POWER` (src/abilities.cc:10929)
+- `ABILITY_BACKUP_POWER` (src/abilities.cc:10929) *(ability mentioned in test)*
 
 ### onStat (1)
 
