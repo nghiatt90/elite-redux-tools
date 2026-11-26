@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { PARTY_SIZE, WEATHER_FOG_PERMANENT } from './constants'
+import { DEFAULT_STAT_STAGE, PARTY_SIZE, STAT_DEF, WEATHER_FOG_PERMANENT } from './constants'
 import { buildPlayerParty } from './driver/buildParty'
 import type { PlayerMonSpec } from './driver/buildParty'
 import type { PlayerChoice } from './driver/expectimax'
@@ -435,5 +435,79 @@ describe('cycle s20ic - team layer fodder: the ability exception', () => {
       predictedAction: { action: 'SWITCH', moveToBeUsed: null, chosenMove: null, target: null },
     }
     expect(fodderAbilityTriggers(s, 3, switchView).usable).toEqual([])
+  })
+
+  it('case 10: a predicted recoil move is not a benefit of an unrelated bench ability', () => {
+    // Double-Edge (moves.json: EFFECT_RECOIL_33, accuracy 100) hurts the USER for
+    // 1/3 of the HP it deals. The recoil, src/battle_script_commands.c:4474-4475:
+    //   int recoilFraction = GetRecoilFraction(gBattleMoves[gCurrentMove].effect);
+    //   gBattleMoveDamage = recoilFraction ? max(1, gTurnStructs[gBattlerAttacker].savedDmg / recoilFraction) : 0;
+    // The foe's own recoil is a cost of the predicted turn, not a gain from the
+    // bench mon's ability: Sap Sipper absorbs GRASS only (src/abilities.cc:2232-2241)
+    // and does nothing to a Normal move.
+    const { layer, s } = fodderFixture([mon('SPECIES_MACHAMP', ['MOVE_DOUBLE_EDGE'])])
+    patchMon(s.state, 0, 2, { hp: 5, abilities: abilitySlots('ABILITY_GUTS') })
+    patchMon(s.state, 0, 3, { hp: 5, abilities: abilitySlots('ABILITY_SAP_SIPPER') })
+    beginTurn(s)
+    const view = readPredictions(s, 50)
+    expect(view.predictedMoveId).toBe('MOVE_DOUBLE_EDGE')
+
+    // Premise: the foe is lower after the stepped probe than before it. The probe
+    // takes 5 HP off the 5 HP reserve, so savedDmg = 5 and the recoil is
+    // max(1, 5 / 3) = 1: 150 -> 149.
+    const foeHpBefore = s.state.battlers[1]!.mon.hp
+    expect(foeHpBefore).toBe(150)
+    const reserve = s.state.sides[0].party[3]!
+    const probe = cloneSession(
+      { ...s, state: stateWithReserve(s.state, 0, reserve, 3), playerReplacement: () => PARTY_SIZE },
+      0,
+    )
+    probe.turnDeps = { ...probe.turnDeps, replacement: undefined }
+    stepTurn(probe, null, structuredClone(view.predictedAction!))
+    expect(probe.state.battlers[0]!.mon.hp).toBe(0)
+    expect(probe.state.battlers[1]!.mon.hp).toBe(foeHpBefore - 1)
+
+    // No trigger, equal usefulness: the lower slot (2, no ability) wins, as in case 2.
+    expect(fodderAbilityTriggers(s, 3, view).usable).toEqual([])
+    const { tags, choice } = fodderChoice({ layer, s })
+    expect(tags).toEqual(['team', 'sacrifice'])
+    expect(choice.switchTo).toBe(2)
+  })
+
+  it('case 11: a predicted self-stat-drop move is not a benefit of an unrelated bench ability', () => {
+    // Clanging Scales (moves.json: EFFECT_ATTACKER_DEFENSE_DOWN_HIT, accuracy 100,
+    // Dragon special, not contact) lowers its USER's Def by 1, certain:
+    //   data/battle_scripts_1.s:806-808 BattleScript_EffectAttackerDefenseDownHit
+    //   setmoveeffect MOVE_EFFECT_DEF_MINUS_1 | MOVE_EFFECT_AFFECTS_USER | MOVE_EFFECT_CERTAIN
+    // That drop is the foe's own cost of the predicted turn, not a gain for the
+    // bench mon: Rough Skin is contact-only (src/abilities.cc:784-793
+    // CHECK(IsMoveMakingContact(move, attacker))) and the move never touches it.
+    const { layer, s } = fodderFixture([mon('SPECIES_MACHAMP', ['MOVE_CLANGING_SCALES'])])
+    patchMon(s.state, 0, 2, { hp: 5, abilities: abilitySlots('ABILITY_GUTS') })
+    patchMon(s.state, 0, 3, { hp: 5, abilities: abilitySlots('ABILITY_ROUGH_SKIN') })
+    beginTurn(s)
+    const view = readPredictions(s, 50)
+    expect(view.predictedMoveId).toBe('MOVE_CLANGING_SCALES')
+    expect(data.dataContext.move('MOVE_CLANGING_SCALES')!.flags.contact).toBeUndefined()
+
+    // Premise: the move hits on the asserted seed (the 5 HP reserve faints) and
+    // the foe's own Def stage is 1 lower after the stepped probe.
+    const reserve = s.state.sides[0].party[3]!
+    const probe = cloneSession(
+      { ...s, state: stateWithReserve(s.state, 0, reserve, 3), playerReplacement: () => PARTY_SIZE },
+      0,
+    )
+    probe.turnDeps = { ...probe.turnDeps, replacement: undefined }
+    const stageBefore = probe.state.battlers[1]!.mon.statStages[STAT_DEF] ?? DEFAULT_STAT_STAGE
+    stepTurn(probe, null, structuredClone(view.predictedAction!))
+    const stageAfter = probe.state.battlers[1]!.mon.statStages[STAT_DEF] ?? DEFAULT_STAT_STAGE
+    expect(probe.state.battlers[0]!.mon.hp).toBe(0)
+    expect(stageBefore).toBe(DEFAULT_STAT_STAGE)
+    expect(stageAfter).toBe(DEFAULT_STAT_STAGE - 1)
+
+    expect(fodderAbilityTriggers(s, 3, view).usable).toEqual([])
+    const { tags, choice } = fodderChoice({ layer, s })
+    expect(tags).toEqual(['team', 'sacrifice'])
+    expect(choice.switchTo).toBe(2)
   })
 })

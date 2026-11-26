@@ -983,9 +983,14 @@ function hasFodderBenefit(
 
   if (wThem.hp < oThem.hp) return true
   if ((wThem.status1 & ~oThem.status1) !== 0) return true
-  if (statStagesBeat(wThem.statStages, oThem.statStages, 'lower')) return true
-  if ((wThem.status2 & ~oThem.status2) !== 0) return true
-  if ((wThem.statuses3 & ~oThem.statuses3) !== 0) return true
+  // statStages, status2 and statuses3 only exist on a live battler; when a run
+  // forced their mon out, `theirMonView` falls back to the party entry and fills
+  // them with defaults. Comparing those defaults against a still-active battler's
+  // pre-existing stages or volatile bits would read as a gain of the ability.
+  const bothActive = wThem.stillActive && oThem.stillActive
+  if (bothActive && statStagesBeat(wThem.statStages, oThem.statStages, 'lower')) return true
+  if (bothActive && (wThem.status2 & ~oThem.status2) !== 0) return true
+  if (bothActive && (wThem.statuses3 & ~oThem.statuses3) !== 0) return true
   if (oThem.itemId !== null && wThem.itemId === null) return true
   if (wThem.ability !== oThem.ability) return true
   if (typesChanged(wThem.types, oThem.types)) return true
@@ -1041,7 +1046,13 @@ function evaluateFodderCandidate(
   for (let seed = 0; seed < FODDER_ABILITY_SEEDS; seed++) {
     const withProbe = fodderProbe(session, slot, reserve, seed)
     const withResult = stepTurn(withProbe, null, structuredClone(action))
-    if (hasFodderBenefit(withProbe, fodderProbe(session, slot, withoutReserve, seed), {
+    // The WITHOUT run is stepped too, on the same seed with its own action copy:
+    // otherwise everything the predicted turn does by itself (the foe's recoil or
+    // Life Orb damage, its own self stat drops, end-of-turn status damage, our
+    // heals, weather) would read as a gain of the ability under test.
+    const withoutProbe = fodderProbe(session, slot, withoutReserve, seed)
+    stepTurn(withoutProbe, null, structuredClone(action))
+    if (hasFodderBenefit(withProbe, withoutProbe, {
       slot,
       theirIndex,
       hook: candidate.hook,
