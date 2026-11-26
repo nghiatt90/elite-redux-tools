@@ -206,9 +206,26 @@ describe('cycles20i: team layer voluntary switching', () => {
     const view = readPredictions(s, 50)
     expect(view.koThreat).toBe(true)
 
+    // Assert premises: for Body Slam, KO prob * accuracy >= STAY_KO_CHANCE, and outspeeds is false
+    const evaluated = evaluateMoves(s, null)
+    const bsInfo = evaluated.find((info) => info.moveId === 'MOVE_BODY_SLAM')!
+    expect(bsInfo).toBeDefined()
+    const bsKoProb = koProbability(damageDistribution(bsInfo.range!), 20)
+    const bsEffectiveKo = bsKoProb * (bsInfo.accuracy / 100)
+    expect(bsEffectiveKo).toBeGreaterThanOrEqual(STAY_KO_CHANCE)
+    expect(outspeeds(s, bsInfo.choice.action, view.predictedAction)).toBe(false)
+
     const stay = stayTest(s, view)
     expect(stay.stay).toBe(false)
     expect(stay.outspeedsWithKo).toBe(false)
+
+    // Positive control in same fixture: HP high enough that koThreat is false -> stay: true, outspeedsWithKo: false
+    patchMon(s.state, 0, 0, { hp: 235 })
+    const viewCtrl = readPredictions(s, 50)
+    expect(viewCtrl.koThreat).toBe(false)
+    const stayCtrl = stayTest(s, viewCtrl)
+    expect(stayCtrl.stay).toBe(true)
+    expect(stayCtrl.outspeedsWithKo).toBe(false)
   })
 
   // Case 4
@@ -496,7 +513,7 @@ describe('cycles20i: team layer voluntary switching', () => {
   it('case 11: entryAbility candidate refused by (a) or (b), and counter candidate refused by (b)', () => {
     // --- entryAbility refused by (a) ---
     // Bench mon has Intimidate (Aggron).
-    // Foe Machamp uses physical move Close Combat which deals > 20% to Aggron.
+    // Foe Machamp uses physical move Waterfall which removes > 20% of Aggron's HP but cannot KO it.
     const playerLead: PlayerMonSpec = {
       species: 'SPECIES_SNORLAX',
       level: 50,
@@ -508,15 +525,18 @@ describe('cycles20i: team layer voluntary switching', () => {
       moves: ['MOVE_IRON_HEAD'],
       ability: 'ABILITY_INTIMIDATE',
     }
-    const foeMachamp = mon('SPECIES_MACHAMP', ['MOVE_CLOSE_COMBAT'])
+    const foeMachamp = mon('SPECIES_MACHAMP', ['MOVE_EARTHQUAKE'])
     const s1 = session([playerLead, playerIntimidate], [foeMachamp])
 
-    // Close Combat vs Aggron is 4x super effective, deals > 20%
-    const ccRange = aiDamageRolls(s1.state, 'MOVE_CLOSE_COMBAT', 1, 0, aiDamageDepsFor(data, s1.state, false))!
+    // Earthquake vs Aggron is physical Ground (4x), deals > 20% but KO probability < 0.15
+    const eqRange = rangeOnOurReserve(s1, 'MOVE_EARTHQUAKE', 1)!
     const aggronHp = s1.state.sides[0].party[1]!.hp
-    expect((highestRoll(ccRange) / aggronHp) * 100).toBeGreaterThan(20)
+    const lossPct = (highestRoll(eqRange) / aggronHp) * 100
+    const eqKoProb = koProbability(damageDistribution(eqRange), aggronHp)
+    expect(lossPct).toBeGreaterThan(20)
+    expect(eqKoProb).toBeLessThan(0.15)
 
-    // ruleEntryAbility refuses via (a)
+    // ruleEntryAbility refuses via (a) with defaults (switchInSafety = 20)
     const layer1 = createTeamLayer({
       roles: ['attacker', 'attacker'],
       genes: { purposeOrder: ['entryAbility', 'preserve', 'sacrifice', 'counter', 'support', 'ppLoop'] },
@@ -526,37 +546,72 @@ describe('cycles20i: team layer voluntary switching', () => {
     expect(choice1?.switchTo).toBeUndefined()
     expect(trace1.some((t) => t.tags.includes('entryAbility'))).toBe(false)
 
-    // Positive control for (a): If predicted move deals <= 20% (e.g. Tackle), Intimidate qualifies
-    const foeTackle = mon('SPECIES_MACHAMP', ['MOVE_TACKLE'])
-    const s1Ctrl = session([playerLead, playerIntimidate], [foeTackle])
+    // Positive control for (a): Same fixture with switchInSafety raised just above the loss percent
+    const layer1Ctrl = createTeamLayer({
+      roles: ['attacker', 'attacker'],
+      genes: {
+        purposeOrder: ['entryAbility', 'preserve', 'sacrifice', 'counter', 'support', 'ppLoop'],
+        switchInSafety: Math.ceil(lossPct) + 1,
+      },
+    })
     const trace1Ctrl: PolicyTraceEntry[] = []
-    const choice1Ctrl = layer1.policy(s1Ctrl, 1, trace1Ctrl)
+    const choice1Ctrl = layer1Ctrl.policy(s1, 1, trace1Ctrl)
     expect(choice1Ctrl?.switchTo).toBe(1)
     expect(trace1Ctrl.some((t) => t.tags.includes('entryAbility'))).toBe(true)
 
     // --- entryAbility refused by (b) ---
-    // Foe has Tackle (predicted move, deals little) AND Close Combat (lethal move with PP).
-    const foeBoth = mon('SPECIES_MACHAMP', ['MOVE_TACKLE', 'MOVE_CLOSE_COMBAT'])
-    const s2 = session([playerLead, playerIntimidate], [foeBoth])
+    // Ghost lead (Gengar) is immune to lethal Fighting move Close Combat (0 damage).
+    // Foe Machamp has Peck (physical Flying move that damages Gengar) AND Close Combat (lethal on Aggron).
+    const playerGhostLead: PlayerMonSpec = {
+      species: 'SPECIES_GENGAR',
+      level: 50,
+      moves: ['MOVE_CELEBRATE'],
+    }
+    const foeBoth = mon('SPECIES_MACHAMP', ['MOVE_PECK', 'MOVE_CLOSE_COMBAT'])
+    const s2 = session([playerGhostLead, playerIntimidate], [foeBoth])
+    patchMon(s2.state, 0, 1, { hp: 80 })
+    const benchAggronHp = 80
+
+    const view2 = readPredictions(s2, 50)
+    expect(view2.predictedMoveId).toBe('MOVE_PECK')
+    const peckBenchRange = rangeOnOurReserve(s2, 'MOVE_PECK', 1)!
+    expect((highestRoll(peckBenchRange) / benchAggronHp) * 100).toBeLessThanOrEqual(DEFAULT_TEAM_GENES.switchInSafety)
+    const ccBenchRange = rangeOnOurReserve(s2, 'MOVE_CLOSE_COMBAT', 1)!
+    const ccBenchKo = koProbability(damageDistribution(ccBenchRange), benchAggronHp)
+    expect(ccBenchKo).toBeGreaterThanOrEqual(DEFAULT_TEAM_GENES.otherMoveKoRisk)
+    expect(stayTest(s2, view2).stay).toBe(false)
+
     const trace2: PolicyTraceEntry[] = []
     const choice2 = layer1.policy(s2, 1, trace2)
     expect(choice2?.switchTo).toBeUndefined()
-    // Refused by (b) because Close Combat KOs with >= otherMoveKoRisk!
+    // Refused by (b) because Close Combat KOs Aggron with >= otherMoveKoRisk!
     expect(trace2.some((t) => t.tags.includes('entryAbility'))).toBe(false)
 
-    // Positive control for (b): Zero out Close Combat PP -> qualifies!
-    s2.state.battlers[1]!.mon.pp[1] = 0
+    // Positive control: same fixture with otherMoveKoRisk: 1.01 (only gene changed)
+    const layer2Ctrl = createTeamLayer({
+      roles: ['attacker', 'attacker'],
+      genes: {
+        purposeOrder: ['entryAbility', 'preserve', 'sacrifice', 'counter', 'support', 'ppLoop'],
+        otherMoveKoRisk: 1.01,
+      },
+    })
     const trace2Ctrl: PolicyTraceEntry[] = []
-    const choice2Ctrl = layer1.policy(s2, 1, trace2Ctrl)
+    beginTurn(s2)
+    const choice2Ctrl = layer2Ctrl.policy(s2, 1, trace2Ctrl)
+    expect(readPredictions(s2, 50).predictedMoveId).toBe('MOVE_PECK')
     expect(choice2Ctrl?.switchTo).toBe(1)
     expect(trace2Ctrl.some((t) => t.tags.includes('entryAbility'))).toBe(true)
 
+    s2.state.battlers[0]!.monToSwitchIntoId = choice2Ctrl!.switchTo ?? PARTY_SIZE
+    stepTurn(s2, choice2Ctrl!.action)
+    expect(s2.state.battlers[0]!.partyIndex).toBe(1)
+
     // --- counter candidate refused by (b) ---
-    // Player lead Jolteon has Thunder Shock (weak attack that outspeeds but does not 2-hit KO).
+    // Player lead Gengar (faster than Snorlax) has Thunder Shock (deals minor damage, does not 2-hit KO Snorlax).
     // Bench mon Machamp has Close Combat (threatens 2-hit KO on foe Snorlax).
-    // Foe Snorlax has Pursuit (deals 15 damage, <= 20% of 100 HP) AND Giga Impact (deals 150+ damage, KOs 100 HP).
-    const playerFastLead: PlayerMonSpec = {
-      species: 'SPECIES_JOLTEON',
+    // Foe Snorlax has Pursuit (deals small damage to Gengar, <= 20% to Machamp) AND Giga Impact (Normal move: Gengar is immune; lethal to Machamp).
+    const playerFastGhostLead: PlayerMonSpec = {
+      species: 'SPECIES_GENGAR',
       level: 50,
       moves: ['MOVE_THUNDER_SHOCK'],
     }
@@ -566,9 +621,19 @@ describe('cycles20i: team layer voluntary switching', () => {
       moves: ['MOVE_CLOSE_COMBAT'],
     }
     const foeSnorlax = mon('SPECIES_SNORLAX', ['MOVE_PURSUIT', 'MOVE_GIGA_IMPACT'])
-    const s3 = session([playerFastLead, playerCounter], [foeSnorlax])
+    const s3 = session([playerFastGhostLead, playerCounter], [foeSnorlax])
     // Patch bench Machamp HP to 100 HP so Giga Impact KOs with >= 0.15, while Pursuit is <= 20%
     patchMon(s3.state, 0, 1, { hp: 100 })
+    const benchMachampHp = 100
+
+    const view3 = readPredictions(s3, 50)
+    expect(view3.predictedMoveId).toBe('MOVE_PURSUIT')
+    const pursuitBenchRange = rangeOnOurReserve(s3, 'MOVE_PURSUIT', 1)!
+    expect((highestRoll(pursuitBenchRange) / benchMachampHp) * 100).toBeLessThanOrEqual(DEFAULT_TEAM_GENES.switchInSafety)
+    const gigaBenchRange = rangeOnOurReserve(s3, 'MOVE_GIGA_IMPACT', 1)!
+    const gigaBenchKo = koProbability(damageDistribution(gigaBenchRange), benchMachampHp)
+    expect(gigaBenchKo).toBeGreaterThanOrEqual(DEFAULT_TEAM_GENES.otherMoveKoRisk)
+    expect(stayTest(s3, view3).stay).toBe(false)
 
     const layerCounter = createTeamLayer({
       roles: ['attacker', 'attacker'],
@@ -580,14 +645,24 @@ describe('cycles20i: team layer voluntary switching', () => {
     // Refused by (b) because Giga Impact KOs Machamp!
     expect(trace3.some((t) => t.tags.includes('counter'))).toBe(false)
 
-    // Positive control: Zero out Giga Impact PP -> counter fires!
-    s3.state.battlers[1]!.mon.pp[1] = 0
+    // Positive control: same fixture with otherMoveKoRisk: 1.01 (only gene changed)
+    const layerCounterCtrl = createTeamLayer({
+      roles: ['attacker', 'attacker'],
+      genes: {
+        purposeOrder: ['counter', 'preserve', 'sacrifice', 'entryAbility', 'support', 'ppLoop'],
+        otherMoveKoRisk: 1.01,
+      },
+    })
     const trace3Ctrl: PolicyTraceEntry[] = []
-    const choice3Ctrl = layerCounter.policy(s3, 1, trace3Ctrl)
+    beginTurn(s3)
+    const choice3Ctrl = layerCounterCtrl.policy(s3, 1, trace3Ctrl)
+    expect(readPredictions(s3, 50).predictedMoveId).toBe('MOVE_PURSUIT')
     expect(choice3Ctrl?.switchTo).toBe(1)
     expect(trace3Ctrl.some((t) => t.tags.includes('counter'))).toBe(true)
-    expect(trace3Ctrl.some((t) => t.tags.includes('counter'))).toBe(true)
-    expect(trace3Ctrl.some((t) => t.tags.includes('counter'))).toBe(true)
+
+    s3.state.battlers[0]!.monToSwitchIntoId = choice3Ctrl!.switchTo ?? PARTY_SIZE
+    stepTurn(s3, choice3Ctrl!.action)
+    expect(s3.state.battlers[0]!.partyIndex).toBe(1)
   })
 
   // Case 12

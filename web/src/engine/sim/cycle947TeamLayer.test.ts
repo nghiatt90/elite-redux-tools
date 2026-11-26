@@ -448,7 +448,7 @@ describe('cycle 947 - team layer: counter', () => {
     expect(lowestRoll(offense)).toBe(103)
     expect(2 * lowestRoll(offense)).toBeGreaterThanOrEqual(165)
 
-    const layer = createTeamLayer({ roles: ['attacker', 'attacker'] })
+    const layer = createTeamLayer({ roles: ['attacker', 'attacker'], genes: { switchInSafety: 50 } })
     const trace: PolicyTraceEntry[] = []
     const choice = layer.policy(s, 1, trace)
     // The role's own trace, not the counter's ['team', 'counter']: the layer
@@ -456,6 +456,18 @@ describe('cycle 947 - team layer: counter', () => {
     expect(trace[0]!.tags).toEqual(['attacker', 'damage'])
     expect(choice!.action.action).toBe('USE_MOVE')
     expect(choiceMoveId(choice!)).toBe('MOVE_THUNDERBOLT')
+
+    // Control: when the active mon does neither (foe HP raised above twice the active's mean roll
+    // of 84.6875, e.g. HP = 175: 2 * 84.6875 = 169.375 < 175, while bench Machamp's 2 * 103 = 206 >= 175),
+    // the bench mon switches in with counter tag.
+    const sCtrl = session([OUR_JOLTEON, OUR_MACHAMP_CC], [mon('SPECIES_MACHAMP', MACHAMP_BODY_SLAM)])
+    patchMon(sCtrl.state, 1, 0, { hp: 175, maxHp: 175 })
+    expect(2 * meanRoll(activeRolls)).toBeLessThan(175)
+    expect(2 * lowestRoll(offense)).toBeGreaterThanOrEqual(175)
+    const ctrlTrace: PolicyTraceEntry[] = []
+    const ctrlChoice = layer.policy(sCtrl, 1, ctrlTrace)
+    expect(ctrlTrace[0]!.tags).toEqual(['team', 'counter'])
+    expect(ctrlChoice!.switchTo).toBe(1)
 
     // Control: the original counter fixture still fires, so the gate only
     // removes this exemption case, not the rule.

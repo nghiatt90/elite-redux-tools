@@ -34,7 +34,12 @@ import type { PolicyTraceEntry } from './driver/policyBattle'
 import { highestRoll, meanRoll, rangeOnOurReserve, stateWithReserve } from './driver/rolePolicy'
 import { aiDamageDepsFor, beginTurn, createSession, stepTurn } from './driver/session'
 import type { BattleSession } from './driver/session'
-import { PP_LOOP_LITTLE_PCT, createTeamLayer } from './driver/teamLayer'
+import {
+  DEFAULT_TEAM_GENES,
+  PP_LOOP_LITTLE_PCT,
+  acceptableSwitchIn,
+  createTeamLayer,
+} from './driver/teamLayer'
 import type { TeamPurpose } from './driver/teamLayer'
 import { createRandomSource } from './rng'
 import type { BattleState } from './state'
@@ -362,9 +367,12 @@ describe('cycle 947b - team layer: support', () => {
     // would ping-pong before either set the screen. The active support sets it,
     // which is the role's own ['support', 'screen'] trace.
     const s = session([OUR_ACTIVE_SUPPORT, OUR_SUPPORT], foePhysical())
+    const genes = { ...DEFAULT_TEAM_GENES, purposeFlags: onlyPurpose('support'), switchInSafety: 50 }
+    expect(acceptableSwitchIn(s, 1, ['MOVE_BODY_SLAM'], genes)).not.toBeNull()
+
     const layer = createTeamLayer({
       roles: ['support', 'support'],
-      genes: { purposeFlags: onlyPurpose('support') },
+      genes: { purposeFlags: onlyPurpose('support'), switchInSafety: 50 },
     })
     const trace: PolicyTraceEntry[] = []
     const choice = layer.policy(s, 1, trace)
