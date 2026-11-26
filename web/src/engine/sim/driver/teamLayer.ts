@@ -27,6 +27,8 @@ import { aiDamageRolls } from '../ai/aiCalcDamage'
 import { doesBattlerHaveAbilityShield } from '../ai/aiAbilityHelpers'
 import {
   DEFAULT_STAT_STAGE,
+  PARTY_SIZE,
+  SIDE_STATUS_HAZARDS_ANY,
   SIDE_STATUS_SAFEGUARD,
   STAT_ATK,
   STATUS1_ANY,
@@ -43,7 +45,8 @@ import {
 import { canBattlerEscape, isAbilityPreventingEscape, type EscapeDeps } from '../escape'
 import { isAbilityOnField, toxicTerrainDamage } from '../fieldEndTurn'
 import { applySwitchInHazards } from '../hazards'
-import type { BattleState, BattlerState } from '../state'
+import { ON_DEFENDER_ABILITIES, getBattlerAbilitySlotsReverse } from '../moveEnd'
+import type { BattleState, BattlerState, SimPartyMon } from '../state'
 import { battlerHasSimAbility, isBattlerWeatherAffected } from '../statBuffs'
 import { applySwitchInAbilities, type BattleStartDeps } from '../switchInAbility'
 import { canBeBurned, canBeParalyzed, canBleed, canGetFrostbite } from '../statusEffects'
@@ -78,7 +81,7 @@ import {
   supportEffectPending,
 } from './rolePolicy'
 import type { BattleSession } from './session'
-import { aiDamageDepsFor, cloneSession, firstLiveReplacement } from './session'
+import { aiDamageDepsFor, cloneSession, firstLiveReplacement, stepTurn } from './session'
 
 /** The six voluntary-switching purposes of decision 14, all implemented. */
 export type TeamPurpose = 'preserve' | 'sacrifice' | 'counter' | 'entryAbility' | 'support' | 'ppLoop'
@@ -700,13 +703,412 @@ export function isGoodCounter(
   return 2 * score.lowestRoll >= theirHp || benchFastHeavy(session, slot, theirHp, predictedAction)
 }
 
-// s20ic plugs in here: a bench mon whose ability or innate fires usefully when it is HIT, TOUCHED or FAINTS ranks first as fodder.
-function fodderAbilityTrigger(
-  _session: BattleSession,
-  _slot: number,
-  _view: PredictionView,
-): boolean {
+// ---------------------------------------------------------------------------
+// Fodder ability exception (s20ic)
+// ---------------------------------------------------------------------------
+
+/** The four ability-hook families that run when the holder is HIT, TOUCHED,
+ * DAMAGED or FAINTS -- exactly the events a fodder mon experiences. It is a
+ * MODEL CHOICE, not a game fact, that an ability from any of these families is
+ * worth ranking a fodder mon for; the game behaviour itself is read from the
+ * sim's existing ports (no ability is ported here). */
+export type FodderHook = 'onDefender' | 'onAbsorb' | 'onDisguise' | 'onRevive'
+
+/** How many seeds a candidate is tried on. Chance abilities (Flame Body 30% on
+ * contact / 20% otherwise, abilities.cc:1126-1134) need several rolls; 32 matches
+ * the "several seeds" idea of rolePolicy.ts's secondTurnRunSafe seed loop. */
+export const FODDER_ABILITY_SEEDS = 32
+
+/** onAbsorb ids, transcribed from data/v2.65beta/abilityHooks.json. Every one is
+ * handled by absorb.ts's applyAbsorbEffect (HEAL / STAT / FLASH_FIRE / EVAPORATE),
+ * reached from the turn path at turn.ts:4517. */
+export const ON_ABSORB_ABILITIES = new Set<string>([
+  'ABILITY_AERODYNAMICS',
+  'ABILITY_DRY_SKIN',
+  'ABILITY_EARTH_EATER',
+  'ABILITY_ELEMENTAL_VORTEX',
+  'ABILITY_EVAPORATE',
+  'ABILITY_FIRE_ASPECT',
+  'ABILITY_FLASH_FIRE',
+  'ABILITY_HEAT_SINK',
+  'ABILITY_ICE_DEW',
+  'ABILITY_JUSTIFIED',
+  'ABILITY_LIGHTNING_ASPECT',
+  'ABILITY_LIGHTNING_ROD',
+  'ABILITY_MOLTEN_CORE',
+  'ABILITY_MOTOR_DRIVE',
+  'ABILITY_POISON_ABSORB',
+  'ABILITY_RESERVOIR',
+  'ABILITY_SAP_SIPPER',
+  'ABILITY_STORM_DRAIN',
+  'ABILITY_VOLT_ABSORB',
+  'ABILITY_WATER_ABSORB',
+  'ABILITY_WELL_BAKED_BODY',
+  'ABILITY_WIND_RIDER',
+])
+
+/** onDisguise ids, transcribed from data/v2.65beta/abilityHooks.json. The hook
+ * itself is NOT ported (DoesDisguiseBlockMove, battle_script_commands.c:12273-12283). */
+export const ON_DISGUISE_ABILITIES = new Set<string>([
+  'ABILITY_DISGUISE',
+  'ABILITY_ICE_FACE',
+  'ABILITY_PATCHWORK',
+])
+
+/** onRevive ids, transcribed from data/v2.65beta/abilityHooks.json. Only
+ * Recurring Nightmare is ported (turn.ts's latchRecurringNightmareOnFaint, the
+ * Cmd_tryfaintmon scan at battle_script_commands.c:3184-3197). */
+export const ON_REVIVE_ABILITIES = new Set<string>([
+  'ABILITY_BACKUP_POWER',
+  'ABILITY_RECURRING_NIGHTMARE',
+])
+
+/** A (ability, hook) pair the sim cannot evaluate, with what is missing. */
+export interface FodderAbilityGap {
+  abilityId: string
+  hook: FodderHook
+  missing: string
+}
+
+/** The static gap set, verified against the sim: all 122 onDefender ids are in
+ * moveEnd.ts's PORTED_DEFENDER_ABILITIES and all 22 onAbsorb ids are handled by
+ * the turn path, so only the unported onDisguise hook and BackUp Power's onRevive
+ * remain. Patchwork is BOTH onDisguise (a gap) and onDefender (ported), so it can
+ * still be usable through onDefender while its onDisguise half is gapped. */
+export const FODDER_ABILITY_GAPS: readonly FodderAbilityGap[] = [
+  {
+    abilityId: 'ABILITY_DISGUISE',
+    hook: 'onDisguise',
+    missing: 'DoesDisguiseBlockMove (battle_script_commands.c:12273-12283) is not ported',
+  },
+  {
+    abilityId: 'ABILITY_ICE_FACE',
+    hook: 'onDisguise',
+    missing: 'DoesDisguiseBlockMove (battle_script_commands.c:12273-12283) is not ported',
+  },
+  {
+    abilityId: 'ABILITY_PATCHWORK',
+    hook: 'onDisguise',
+    missing: 'DoesDisguiseBlockMove (battle_script_commands.c:12273-12283) is not ported',
+  },
+  {
+    abilityId: 'ABILITY_BACKUP_POWER',
+    hook: 'onRevive',
+    missing: 'BackUp Power onRevive (electric terrain) is not ported; turn.ts latches only Recurring Nightmare',
+  },
+]
+
+/** The result of the fodder ability evaluation for one bench slot. */
+export interface FodderAbilityTriggers {
+  usable: string[]
+  gaps: FodderAbilityGap[]
+}
+
+function fodderHooksFor(abilityId: string): FodderHook[] {
+  const hooks: FodderHook[] = []
+  if (ON_DEFENDER_ABILITIES.has(abilityId)) hooks.push('onDefender')
+  if (ON_ABSORB_ABILITIES.has(abilityId)) hooks.push('onAbsorb')
+  if (ON_DISGUISE_ABILITIES.has(abilityId)) hooks.push('onDisguise')
+  if (ON_REVIVE_ABILITIES.has(abilityId)) hooks.push('onRevive')
+  return hooks
+}
+
+function staticFodderGap(abilityId: string, hook: FodderHook): FodderAbilityGap | null {
+  return FODDER_ABILITY_GAPS.find((gap) => gap.abilityId === abilityId && gap.hook === hook) ?? null
+}
+
+/** One (ability id, hook, slot index) candidate of a bench mon, in the reverse
+ * slot order the game's own ON_ABILITY scan uses. */
+interface FodderCandidate {
+  abilityId: string
+  hook: FodderHook
+  slotIndex: number
+}
+
+function fodderCandidates(reserve: SimPartyMon): FodderCandidate[] {
+  const candidates: FodderCandidate[] = []
+  const seen = new Set<string>()
+  for (const { abilityId, slotIndex } of getBattlerAbilitySlotsReverse(reserve.abilities)) {
+    for (const hook of fodderHooksFor(abilityId)) {
+      const key = `${abilityId}::${hook}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      candidates.push({ abilityId, hook, slotIndex })
+    }
+  }
+  return candidates
+}
+
+/** A clone with `slot` as battler 0 and no faint replacement: the probe must not
+ * predict or recurse through the layer's own replacement. `PARTY_SIZE` is the
+ * "none" value (turn.ts:2048); the end-of-turn faint-replacement path
+ * (switchIn.ts:applyEndOfTurnReplacements) instead hands its result straight to
+ * switchIn, which rejects PARTY_SIZE, so the documented "no replacement" default
+ * (`deps.replacement` absent, turn.ts:648) is what actually brings nothing in. */
+function fodderProbe(session: BattleSession, slot: number, reserve: SimPartyMon, seed: number): BattleSession {
+  const base: BattleSession = {
+    ...session,
+    state: stateWithReserve(session.state, 0, reserve, slot),
+    playerReplacement: () => PARTY_SIZE,
+  }
+  const probe = cloneSession(base, seed)
+  probe.turnDeps = { ...probe.turnDeps, replacement: undefined }
+  return probe
+}
+
+/** `reserve` with `abilityId` nulled in every ability slot it appears in. */
+function reserveWithoutAbility(reserve: SimPartyMon, abilityId: string): SimPartyMon {
+  const clear = (id: string | null): string | null => (id === abilityId ? null : id)
+  return {
+    ...reserve,
+    abilities: {
+      ability: clear(reserve.abilities.ability),
+      innates: [
+        clear(reserve.abilities.innates[0]),
+        clear(reserve.abilities.innates[1]),
+        clear(reserve.abilities.innates[2]),
+      ],
+    },
+  }
+}
+
+/** The observables of their ORIGINAL active mon. If it was forced out the
+ * battler at id 1 is somebody else, so read the party entry instead (which has
+ * HP/status1/item/ability/types but not stat stages, statuses3 or volatiles). */
+interface TheirMonView {
+  hp: number
+  status1: number
+  statStages: readonly number[]
+  status2: number
+  statuses3: number
+  itemId: string | null
+  ability: string | null
+  types: readonly string[]
+  volatiles: BattlerState['volatiles'] | null
+  stillActive: boolean
+}
+
+function theirMonView(state: BattleState, partyIndex: number): TheirMonView {
+  const battler = state.battlers[1]
+  if (battler && battler.partyIndex === partyIndex) {
+    return {
+      hp: battler.mon.hp,
+      status1: battler.mon.status1,
+      statStages: battler.mon.statStages,
+      status2: battler.mon.status2,
+      statuses3: battler.statuses3,
+      itemId: battler.mon.itemId,
+      ability: battler.mon.abilities.ability,
+      types: battler.mon.types,
+      volatiles: battler.volatiles,
+      stillActive: true,
+    }
+  }
+  const mon = state.sides[1].party[partyIndex]
+  return {
+    hp: mon?.hp ?? 0,
+    status1: mon?.status1 ?? 0,
+    statStages: [],
+    status2: 0,
+    statuses3: 0,
+    itemId: mon?.itemId ?? null,
+    ability: mon?.abilities.ability ?? null,
+    types: mon?.types ?? ['MYSTERY', 'MYSTERY', 'MYSTERY'],
+    volatiles: null,
+    stillActive: false,
+  }
+}
+
+function statStagesBeat(after: readonly number[], before: readonly number[], direction: 'lower' | 'higher'): boolean {
+  for (let i = 0; i < 8; i++) {
+    const a = after[i] ?? DEFAULT_STAT_STAGE
+    const b = before[i] ?? DEFAULT_STAT_STAGE
+    if (direction === 'lower' ? a < b : a > b) return true
+  }
   return false
+}
+
+function typesChanged(after: readonly string[], before: readonly string[]): boolean {
+  return after[0] !== before[0] || after[1] !== before[1] || after[2] !== before[2]
+}
+
+/** Their-side hazards gained between the two runs. */
+function gainedHazardsOnTheirSide(withState: BattleState, withoutState: BattleState): boolean {
+  const w = withState.sides[1]
+  const o = withoutState.sides[1]
+  if (w.timers.spikesAmount > o.timers.spikesAmount) return true
+  if (w.timers.toxicSpikesAmount > o.timers.toxicSpikesAmount) return true
+  if (w.timers.stealthRockType !== 0 && o.timers.stealthRockType === 0) return true
+  if (w.timers.stickyWebTimer > o.timers.stickyWebTimer) return true
+  if (w.timers.caltrops && !o.timers.caltrops) return true
+  if (w.timers.hotCoals && !o.timers.hotCoals) return true
+  if (w.timers.foamyWeb && !o.timers.foamyWeb) return true
+  const newBits = (w.statuses & SIDE_STATUS_HAZARDS_ANY) & ~(o.statuses & SIDE_STATUS_HAZARDS_ANY)
+  return newBits !== 0
+}
+
+/** Opponent volatile fields handleDefenderMoveEndAbility writes onto the
+ * attacker: Cursed Body's disable, Talon Trap / Itchy Defense's wrap, Supersweet
+ * Syrup's embargo and Perish Body's perish counter. */
+function opponentVolatileGained(after: BattlerState['volatiles'], before: BattlerState['volatiles']): boolean {
+  if (after.disableTimer > before.disableTimer) return true
+  if (after.disabledMove !== null && before.disabledMove === null) return true
+  if (after.wrapTurns > before.wrapTurns) return true
+  if (after.wrapAbility !== null && before.wrapAbility === null) return true
+  if (after.embargoTimer > before.embargoTimer) return true
+  if (after.perishSongTimer > before.perishSongTimer) return true
+  return false
+}
+
+interface FodderBenefitContext {
+  slot: number
+  theirIndex: number
+  hook: FodderHook
+  abilitySlotIndex: number
+  predictedMoveId: string | null
+}
+
+/** Anything the WITH run did to them, or for us, that the WITHOUT run did not.
+ * MODEL CHOICE ("beneficial to us or detrimental to them is a gain for us"): any
+ * gain counts, even when the same ability also costs something. */
+function hasFodderBenefit(
+  withProbe: BattleSession,
+  withoutProbe: BattleSession,
+  ctx: FodderBenefitContext,
+): boolean {
+  const w = withProbe.state
+  const o = withoutProbe.state
+  const wThem = theirMonView(w, ctx.theirIndex)
+  const oThem = theirMonView(o, ctx.theirIndex)
+
+  if (wThem.hp < oThem.hp) return true
+  if ((wThem.status1 & ~oThem.status1) !== 0) return true
+  if (statStagesBeat(wThem.statStages, oThem.statStages, 'lower')) return true
+  if ((wThem.status2 & ~oThem.status2) !== 0) return true
+  if ((wThem.statuses3 & ~oThem.statuses3) !== 0) return true
+  if (oThem.itemId !== null && wThem.itemId === null) return true
+  if (wThem.ability !== oThem.ability) return true
+  if (typesChanged(wThem.types, oThem.types)) return true
+  if (wThem.volatiles && oThem.volatiles && opponentVolatileGained(wThem.volatiles, oThem.volatiles)) return true
+  // Forced out while still alive: the battler is no longer their original mon.
+  if (!wThem.stillActive && oThem.stillActive && wThem.hp > 0) return true
+
+  // Our side: the candidate is still the battler and gained a stat stage.
+  const ourWith = w.battlers[0]
+  const ourWithout = o.battlers[0]
+  if (
+    ourWith &&
+    ourWithout &&
+    ourWith.mon.hp > 0 &&
+    ourWith.partyIndex === ctx.slot &&
+    ourWithout.partyIndex === ctx.slot &&
+    statStagesBeat(ourWith.mon.statStages, ourWithout.mon.statStages, 'higher')
+  ) {
+    return true
+  }
+  if (gainedHazardsOnTheirSide(w, o)) return true
+  if (
+    (w.field.weather !== o.field.weather || w.field.statuses !== o.field.statuses) &&
+    fieldChangeBenefitsTeam(withoutProbe, withProbe, ctx.predictedMoveId)
+  ) {
+    return true
+  }
+  // Our HP only counts for onAbsorb: an unrelated ability must not turn damage
+  // drift between two runs into a fake onDefender benefit.
+  if (ctx.hook === 'onAbsorb' && ourWith && ourWithout && ourWith.mon.hp > ourWithout.mon.hp) return true
+  if (ctx.hook === 'onRevive') {
+    const latched = w.singleUseAbility[ctx.slot]?.[ctx.abilitySlotIndex]?.[0] ?? 0
+    const wasLatched = o.singleUseAbility[ctx.slot]?.[ctx.abilitySlotIndex]?.[0] ?? 0
+    if (latched !== 0 && wasLatched === 0) return true
+  }
+  return false
+}
+
+/** Runs the WITH / WITHOUT pair over the seeds; stops at the first seed that
+ * shows a benefit. If none does, the WITH run's unmodelled notes are the gap
+ * report when they name the ability. */
+function evaluateFodderCandidate(
+  session: BattleSession,
+  slot: number,
+  reserve: SimPartyMon,
+  candidate: FodderCandidate,
+  view: PredictionView,
+  action: ChosenAction,
+): { usable: boolean; missing: string | null } {
+  const withoutReserve = reserveWithoutAbility(reserve, candidate.abilityId)
+  const theirIndex = session.state.battlers[1]?.partyIndex ?? 0
+  let missing: string | null = null
+  for (let seed = 0; seed < FODDER_ABILITY_SEEDS; seed++) {
+    const withProbe = fodderProbe(session, slot, reserve, seed)
+    const withResult = stepTurn(withProbe, null, structuredClone(action))
+    if (hasFodderBenefit(withProbe, fodderProbe(session, slot, withoutReserve, seed), {
+      slot,
+      theirIndex,
+      hook: candidate.hook,
+      abilitySlotIndex: candidate.slotIndex,
+      predictedMoveId: view.predictedMoveId,
+    })) {
+      return { usable: true, missing: null }
+    }
+    const note = withResult.unmodelled.find((line) => line.includes(candidate.abilityId))
+    if (note) missing = note
+  }
+  return { usable: false, missing }
+}
+
+/**
+ * Which of a bench mon's abilities and innates fire usefully when it is hit,
+ * touched or faints. The game decides applicability: the sim runs the predicted
+ * turn twice on cloned sessions, once with the ability and once with it nulled,
+ * and a gain in the WITH run marks it usable. No condition (contact, Long Reach,
+ * canBeBurned, Clear Body, survival) is copied -- the ability's own port is the
+ * only source of truth. `gaps` enumerates what the sim cannot evaluate.
+ */
+export function fodderAbilityTriggers(
+  session: BattleSession,
+  slot: number,
+  view: PredictionView,
+): FodderAbilityTriggers {
+  const reserve = session.state.sides[0].party[slot]
+  if (!reserve || reserve.speciesId === null || reserve.hp <= 0) return { usable: [], gaps: [] }
+
+  const candidates = fodderCandidates(reserve)
+  if (candidates.length === 0) return { usable: [], gaps: [] }
+
+  const action = view.predictedAction
+  const hasPrediction =
+    action !== null && action.action === 'USE_MOVE' && Boolean(action.chosenMove?.id ?? action.moveToBeUsed?.id)
+
+  const usable: string[] = []
+  const gaps: FodderAbilityGap[] = []
+  const pushGap = (gap: FodderAbilityGap): void => {
+    if (!gaps.some((g) => g.abilityId === gap.abilityId && g.hook === gap.hook)) gaps.push(gap)
+  }
+
+  for (const candidate of candidates) {
+    const staticGap = staticFodderGap(candidate.abilityId, candidate.hook)
+    if (staticGap) {
+      pushGap(staticGap)
+      continue
+    }
+    if (!hasPrediction) continue
+    const result = evaluateFodderCandidate(session, slot, reserve, candidate, view, action as ChosenAction)
+    if (result.usable) {
+      if (!usable.includes(candidate.abilityId)) usable.push(candidate.abilityId)
+    } else if (result.missing) {
+      pushGap({ abilityId: candidate.abilityId, hook: candidate.hook, missing: result.missing })
+    }
+  }
+
+  return { usable, gaps }
+}
+
+/** sacrifice's fodder ranking key: a bench mon whose ability or innate fires
+ * usefully when it is HIT, TOUCHED or FAINTS ranks first. MODEL CHOICE (owner,
+ * 2026-11-26): the ability exception is one of the three switch reasons of
+ * decision 14. */
+function fodderAbilityTrigger(session: BattleSession, slot: number, view: PredictionView): boolean {
+  return fodderAbilityTriggers(session, slot, view).usable.length > 0
 }
 
 /**
@@ -808,9 +1210,13 @@ function rankBenchFodder(
   slots: readonly number[],
   view: PredictionView,
 ): number[] {
+  // Compute the trigger ONCE per slot, not inside the sort comparator: each one
+  // runs the probe over seeds, so a comparator call would multiply the cost.
+  const trigger = new Map<number, boolean>()
+  for (const slot of slots) trigger.set(slot, fodderAbilityTrigger(session, slot, view))
   return slots.slice().sort((slotA, slotB) => {
-    const trigA = fodderAbilityTrigger(session, slotA, view)
-    const trigB = fodderAbilityTrigger(session, slotB, view)
+    const trigA = trigger.get(slotA)!
+    const trigB = trigger.get(slotB)!
     if (trigA !== trigB) return trigA ? -1 : 1
     return compareUsefulness(
       monUsefulness(session, slotA, view),
