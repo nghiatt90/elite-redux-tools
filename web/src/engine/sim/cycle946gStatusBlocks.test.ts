@@ -454,6 +454,7 @@ describe('cycle 946g - Status Move Ability Immunity and Prankster Block', () => 
           preserve: false,
           sacrifice: false,
           counter: false,
+          doubleSwitch: false,
           entryAbility: false,
           support: false,
           ppLoop: true,

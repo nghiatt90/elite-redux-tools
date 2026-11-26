@@ -163,7 +163,10 @@ describe('cycles20i: team layer voluntary switching', () => {
     expect(stay2.stay).toBe(false)
     expect(stay2.outspeedsWithKo).toBe(false)
 
-    const layer2 = createTeamLayer({ roles: ['attacker', 'support'] })
+    const layer2 = createTeamLayer({
+      roles: ['attacker', 'support'],
+      genes: { purposeFlags: { ...DEFAULT_TEAM_GENES.purposeFlags, doubleSwitch: false } },
+    })
     const trace2: PolicyTraceEntry[] = []
     beginTurn(s2)
     const choice2 = layer2.policy(s2, 1, trace2)
@@ -539,7 +542,7 @@ describe('cycles20i: team layer voluntary switching', () => {
     // ruleEntryAbility refuses via (a) with defaults (switchInSafety = 20)
     const layer1 = createTeamLayer({
       roles: ['attacker', 'attacker'],
-      genes: { purposeOrder: ['entryAbility', 'preserve', 'sacrifice', 'counter', 'support', 'ppLoop'] },
+      genes: { purposeOrder: ['entryAbility', 'preserve', 'sacrifice', 'counter', 'doubleSwitch', 'support', 'ppLoop'] },
     })
     const trace1: PolicyTraceEntry[] = []
     const choice1 = layer1.policy(s1, 1, trace1)
@@ -550,7 +553,7 @@ describe('cycles20i: team layer voluntary switching', () => {
     const layer1Ctrl = createTeamLayer({
       roles: ['attacker', 'attacker'],
       genes: {
-        purposeOrder: ['entryAbility', 'preserve', 'sacrifice', 'counter', 'support', 'ppLoop'],
+        purposeOrder: ['entryAbility', 'preserve', 'sacrifice', 'counter', 'doubleSwitch', 'support', 'ppLoop'],
         switchInSafety: Math.ceil(lossPct) + 1,
       },
     })
@@ -591,7 +594,7 @@ describe('cycles20i: team layer voluntary switching', () => {
     const layer2Ctrl = createTeamLayer({
       roles: ['attacker', 'attacker'],
       genes: {
-        purposeOrder: ['entryAbility', 'preserve', 'sacrifice', 'counter', 'support', 'ppLoop'],
+        purposeOrder: ['entryAbility', 'preserve', 'sacrifice', 'counter', 'doubleSwitch', 'support', 'ppLoop'],
         otherMoveKoRisk: 1.01,
       },
     })
@@ -637,7 +640,7 @@ describe('cycles20i: team layer voluntary switching', () => {
 
     const layerCounter = createTeamLayer({
       roles: ['attacker', 'attacker'],
-      genes: { purposeOrder: ['counter', 'preserve', 'sacrifice', 'entryAbility', 'support', 'ppLoop'] },
+      genes: { purposeOrder: ['counter', 'preserve', 'sacrifice', 'doubleSwitch', 'entryAbility', 'support', 'ppLoop'] },
     })
     const trace3: PolicyTraceEntry[] = []
     const choice3 = layerCounter.policy(s3, 1, trace3)
@@ -649,7 +652,7 @@ describe('cycles20i: team layer voluntary switching', () => {
     const layerCounterCtrl = createTeamLayer({
       roles: ['attacker', 'attacker'],
       genes: {
-        purposeOrder: ['counter', 'preserve', 'sacrifice', 'entryAbility', 'support', 'ppLoop'],
+        purposeOrder: ['counter', 'preserve', 'sacrifice', 'doubleSwitch', 'entryAbility', 'support', 'ppLoop'],
         otherMoveKoRisk: 1.01,
       },
     })

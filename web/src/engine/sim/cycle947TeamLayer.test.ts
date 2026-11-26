@@ -166,7 +166,7 @@ describe('cycle 947 - team layer: purpose order', () => {
       roles: ['attacker', 'setupSweeper'],
       genes: {
         preserve: 0,
-        purposeOrder: ['counter', 'preserve', 'sacrifice', 'entryAbility', 'support', 'ppLoop'],
+        purposeOrder: ['counter', 'preserve', 'sacrifice', 'doubleSwitch', 'entryAbility', 'support', 'ppLoop'],
       },
     })
     const trace2: PolicyTraceEntry[] = []
@@ -740,6 +740,7 @@ describe('cycle 947 - team layer: the switch mechanism', () => {
           preserve: false,
           sacrifice: false,
           counter: false,
+          doubleSwitch: false,
           entryAbility: true,
           support: false,
           ppLoop: false,
@@ -824,6 +825,7 @@ describe('cycle 947 - team layer: playPolicyBattle wiring', () => {
           preserve: false,
           sacrifice: false,
           counter: false,
+          doubleSwitch: false,
           entryAbility: false,
           support: false,
           ppLoop: false,
@@ -900,6 +902,7 @@ describe('cycle 947 - team layer: fall-through and purity', () => {
           preserve: false,
           sacrifice: false,
           counter: false,
+          doubleSwitch: false,
           entryAbility: false,
           support: false,
           ppLoop: false,

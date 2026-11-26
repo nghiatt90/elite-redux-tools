@@ -1202,7 +1202,7 @@ export function renderGateReport(input: GateReportInput): string {
       'Preserve fired on a stay turn',
     ]),
   )
-  lines.push(tableRow(Array(11).fill('---')))
+  lines.push(tableRow(Array(TEAM_PURPOSES.length + 5).fill('---')))
   for (const fight of input.fights) {
     const summary = fight.role
     lines.push(

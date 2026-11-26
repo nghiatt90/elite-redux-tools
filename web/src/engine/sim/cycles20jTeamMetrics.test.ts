@@ -122,8 +122,9 @@ function roleBattle(
   observer: ReturnType<typeof createPolicyObserver>,
   maxTurns: number,
   seed = 1,
+  genes?: Partial<TeamGenes>,
 ) {
-  const layer = createTeamLayer({ roles })
+  const layer = createTeamLayer({ roles, genes })
   return playPolicyBattle({
     data,
     playerParty: buildPlayerParty(playerMons, 50, data),
@@ -151,12 +152,15 @@ describe('cycle s20j - team-layer columns, real play', () => {
       [mon('SPECIES_MACHAMP', ['MOVE_WATER_PULSE'])],
       observer,
       1,
+      1,
+      { purposeFlags: { ...DEFAULT_TEAM_GENES.purposeFlags, doubleSwitch: false } },
     )
 
     expect(observer.teamCounters.switches.support).toBe(1)
     expect(observer.teamCounters.switches.preserve).toBe(0)
     expect(observer.teamCounters.switches.sacrifice).toBe(0)
     expect(observer.teamCounters.switches.counter).toBe(0)
+    expect(observer.teamCounters.switches.doubleSwitch).toBe(0)
     expect(observer.teamCounters.switches.entryAbility).toBe(0)
     expect(observer.teamCounters.switches.ppLoop).toBe(0)
     expect(observer.turn1Action).toBe('SWITCH')
@@ -179,7 +183,7 @@ describe('cycle s20j - team-layer columns, real play', () => {
 
     expect(observer.teamCounters.stayTurns).toBe(1)
     expect(observer.teamCounters.stayOutspeedTurns).toBe(1)
-    for (const purpose of ['preserve', 'sacrifice', 'counter', 'entryAbility', 'support', 'ppLoop'] as const) {
+    for (const purpose of ['preserve', 'sacrifice', 'counter', 'doubleSwitch', 'entryAbility', 'support', 'ppLoop'] as const) {
       expect(observer.teamCounters.switches[purpose]).toBe(0)
       expect(observer.teamCounters.turnsWithoutSwitch[purpose]).toBe(0)
     }
@@ -350,6 +354,7 @@ function record(won: boolean, duplicate = false): ComparisonGameRecord {
       preserve: 1,
       sacrifice: 0,
       counter: 0,
+      doubleSwitch: 0,
       entryAbility: 0,
       support: 0,
       ppLoop: 0,
@@ -358,6 +363,7 @@ function record(won: boolean, duplicate = false): ComparisonGameRecord {
       preserve: 0,
       sacrifice: 2,
       counter: 0,
+      doubleSwitch: 0,
       entryAbility: 0,
       support: 0,
       ppLoop: 0,
@@ -402,7 +408,7 @@ describe('cycle s20j - report columns', () => {
       report.indexOf('## Team layer (role policy)'),
       report.indexOf('## Turn 1 actions (role policy)'),
     )
-    expect(team).toContain('| TRAINER_X-attack | 2 | 0 | 0 | 0 | 0 | 0 | sacrifice=4 | 6 | 2 | 2 |')
+    expect(team).toContain('| TRAINER_X-attack | 2 | 0 | 0 | 0 | 0 | 0 | 0 | sacrifice=4 | 6 | 2 | 2 |')
     const turn1 = report.slice(
       report.indexOf('## Turn 1 actions (role policy)'),
       report.indexOf('## Classification'),

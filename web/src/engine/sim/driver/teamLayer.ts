@@ -3,21 +3,21 @@
 // decided ACROSS the party, composed with `chooseRoleAction` into one policy for
 // `playPolicyBattle`.
 //
-// The layer runs BEFORE the active mon's role rule: six team PURPOSES are
+// The layer runs BEFORE the active mon's role rule: seven team PURPOSES are
 // checked in the GENE order (`genes.purposeOrder`, a permutation), each with its
 // own on/off gene, and the first that fires decides the turn. A purpose that
 // does not fire falls through, and the active mon's `roles[partyIndex]` rule
 // decides as usual. `replacement` is the same idea for the turn after a faint.
 //
-// All six purposes are implemented: preserve, sacrifice, counter and the switch
-// mechanism they share (s20c), plus entryAbility, support and the PP stall loop
-// (s20c2). The entry-ability and support probes run on cloned sessions, and the
-// PP loop keeps a per-layer stall counter plus a latched stop; none of them
-// touch the real RNG. The PP loop also prices each bench candidate's SWITCH-IN
-// on its own clone: entry hazards (`applySwitchInHazards`) and Toxic Terrain
-// chip, and it disqualifies a candidate the sim's hazard port gives a status,
-// so a loop that is free of move damage but not of switching is not counted as
-// free (s20c2bb, s20c2bc).
+// All seven purposes are implemented: preserve, sacrifice, counter, doubleSwitch
+// and the switch mechanism they share (s20c, s20k), plus entryAbility, support
+// and the PP stall loop (s20c2). The entry-ability, support and double-switch
+// probes run on cloned sessions, and the PP loop keeps a per-layer stall counter
+// plus a latched stop; none of them touch the real RNG. The PP loop also prices
+// each bench candidate's SWITCH-IN on its own clone: entry hazards
+// (`applySwitchInHazards`) and Toxic Terrain chip, and it disqualifies a
+// candidate the sim's hazard port gives a status, so a loop that is free of move
+// damage but not of switching is not counted as free (s20c2bb, s20c2bc).
 //
 // Pure and headless: no React, no I/O. Every game rule cites the C or the data
 // row that fixes it; every threshold a player chose is marked MODEL CHOICE.
@@ -81,17 +81,26 @@ import {
   supportEffectPending,
 } from './rolePolicy'
 import type { BattleSession } from './session'
-import { aiDamageDepsFor, cloneSession, firstLiveReplacement, stepTurn } from './session'
+import { aiDamageDepsFor, beginTurn, cloneSession, firstLiveReplacement, stepTurn } from './session'
 
-/** The six voluntary-switching purposes of decision 14, all implemented. */
-export type TeamPurpose = 'preserve' | 'sacrifice' | 'counter' | 'entryAbility' | 'support' | 'ppLoop'
+/** The seven voluntary-switching purposes of decision 14, all implemented. */
+export type TeamPurpose =
+  | 'preserve'
+  | 'sacrifice'
+  | 'counter'
+  | 'doubleSwitch'
+  | 'entryAbility'
+  | 'support'
+  | 'ppLoop'
 
 /** Every purpose, in decision 14's own order (preserve, sacrifice, counter,
- * entry ability, bring in support, PP stall loop). The default gene order. */
+ * double switch, entry ability, bring in support, PP stall loop). The default
+ * gene order. */
 export const TEAM_PURPOSES: readonly TeamPurpose[] = [
   'preserve',
   'sacrifice',
   'counter',
+  'doubleSwitch',
   'entryAbility',
   'support',
   'ppLoop',
@@ -118,12 +127,12 @@ export interface TeamGenes {
   preserve: number | null
 }
 
-/** Decision 14's defaults: "six purposes, checked in the GENE order (a
+/** Decision 14's defaults: "seven purposes, checked in the GENE order (a
  * permutation) ... each with an on/off gene"; "Team genes: purpose order,
  * purpose flags, switch-in safety threshold, other-move KO risk, preserve".
  * The order below is the design's own listing (preserve, sacrifice, counter,
- * entry ability, bring in support, PP stall loop), every flag on, the 20%
- * switch-in safety line (negligible loss), the 0.15 other-move KO risk,
+ * double switch, entry ability, bring in support, PP stall loop), every flag on,
+ * the 20% switch-in safety line (negligible loss), the 0.15 other-move KO risk,
  * and no preserve member. */
 export const DEFAULT_TEAM_GENES: TeamGenes = {
   purposeOrder: [...TEAM_PURPOSES],
@@ -131,6 +140,7 @@ export const DEFAULT_TEAM_GENES: TeamGenes = {
     preserve: true,
     sacrifice: true,
     counter: true,
+    doubleSwitch: true,
     entryAbility: true,
     support: true,
     ppLoop: true,
@@ -1372,6 +1382,133 @@ function ruleCounter(
   return switchChoice(session, pickBestBench(candidates)!.slot, view)
 }
 
+export const DOUBLE_SWITCH_PROBE_SEED = 0
+
+export interface DoubleSwitchPlan {
+  choice: PlayerChoice // the FIRST switch, as switchChoice returns it
+  firstSlot: number
+  secondSlot: number
+  secondMoveId: string
+}
+
+/**
+ * doubleSwitch: switch in to take a hit, predict the next move the opponent is
+ * going to use, and switch again to a counter that takes that predicted move
+ * well.
+ *
+ * 2-of-3 prediction majority, the ordering of the second counter by smallest
+ * incoming fraction, and the single probe seed are MODEL CHOICE.
+ */
+export function planDoubleSwitch(
+  session: BattleSession,
+  view: PredictionView,
+  genes: TeamGenes,
+): DoubleSwitchPlan | null {
+  if (view.predictedMoveId === null || view.predictedAction === null) return null
+  const theirHp = theirActiveHp(session)
+  if (theirHp <= 0) return null
+
+  const firstCandidates: BenchScore[] = []
+  for (const slot of livingBenchSlots(session)) {
+    const scored = acceptableSwitchIn(session, slot, [view.predictedMoveId], genes)
+    if (scored) firstCandidates.push(scored)
+  }
+  firstCandidates.sort((a, b) => (betterBench(a, b) ? -1 : betterBench(b, a) ? 1 : 0))
+
+  for (const candidate of firstCandidates) {
+    const choice = switchChoice(session, candidate.slot, view)
+    if (!choice) continue
+
+    const base: BattleSession = {
+      ...session,
+      playerReplacement: () => PARTY_SIZE,
+    }
+    const probe = cloneSession(base, DOUBLE_SWITCH_PROBE_SEED)
+    probe.turnDeps = { ...probe.turnDeps, replacement: undefined }
+
+    if (probe.state.battlers[0]) {
+      probe.state.battlers[0].monToSwitchIntoId = choice.switchTo ?? PARTY_SIZE
+    }
+    stepTurn(probe, structuredClone(choice.action), structuredClone(view.predictedAction))
+
+    if (
+      probe.state.battleOutcome != null ||
+      !probe.state.battlers[0] ||
+      probe.state.battlers[0].mon.hp <= 0 ||
+      probe.state.battlers[0].partyIndex !== candidate.slot ||
+      theirActiveHp(probe) <= 0
+    ) {
+      continue
+    }
+
+    beginTurn(probe)
+    const samples = predictAi(probe, SAMPLE_COUNT, PREDICTION_SEED)
+    const moveCounts = new Map<string, number>()
+    const firstActionByMove = new Map<string, ChosenAction>()
+
+    for (const sample of samples) {
+      const action = sample.action
+      if (!action || action.action !== 'USE_MOVE') continue
+      const moveId = action.chosenMove?.id ?? action.moveToBeUsed?.id ?? null
+      if (!moveId) continue
+      moveCounts.set(moveId, (moveCounts.get(moveId) ?? 0) + 1)
+      if (!firstActionByMove.has(moveId)) {
+        firstActionByMove.set(moveId, action)
+      }
+    }
+
+    let secondMoveId: string | null = null
+    let secondAction: ChosenAction | null = null
+    for (const [moveId, count] of moveCounts) {
+      if (count >= 2) {
+        secondMoveId = moveId
+        secondAction = firstActionByMove.get(moveId) ?? null
+        break
+      }
+    }
+    if (!secondMoveId || !secondAction) continue
+
+    const secondCandidates: BenchScore[] = []
+    for (const slot of livingBenchSlots(probe)) {
+      const scored = acceptableSwitchIn(probe, slot, [secondMoveId], genes)
+      if (!scored) continue
+      if (!isGoodCounter(probe, slot, scored, theirActiveHp(probe), secondAction)) continue
+      secondCandidates.push(scored)
+    }
+    if (secondCandidates.length === 0) continue
+
+    let bestSecond: BenchScore | null = null
+    for (const cand of secondCandidates) {
+      if (bestSecond === null) {
+        bestSecond = cand
+      } else if (cand.incomingFraction < bestSecond.incomingFraction) {
+        bestSecond = cand
+      } else if (cand.incomingFraction === bestSecond.incomingFraction && betterBench(cand, bestSecond)) {
+        bestSecond = cand
+      }
+    }
+    if (!bestSecond) continue
+
+    return {
+      choice,
+      firstSlot: candidate.slot,
+      secondSlot: bestSecond.slot,
+      secondMoveId,
+    }
+  }
+
+  return null
+}
+
+function ruleDoubleSwitch(
+  session: BattleSession,
+  view: PredictionView,
+  genes: TeamGenes,
+): PlayerChoice | null {
+  const plan = planDoubleSwitch(session, view, genes)
+  return plan ? plan.choice : null
+}
+
 /** entryAbility: a bench mon's switch-in ability applies now and the mon
  * qualifies under the switch-in rule (negligible loss under `switchInSafety`%
  * of current HP and no other move KOs with >= `otherMoveKoRisk`). A candidate
@@ -1866,6 +2003,9 @@ export function createTeamLayer(config: {
             break
           case 'counter':
             choice = ruleCounter(session, view, genes)
+            break
+          case 'doubleSwitch':
+            choice = ruleDoubleSwitch(session, view, genes)
             break
           case 'entryAbility':
             choice = ruleEntryAbility(session, view, genes)

@@ -75,6 +75,7 @@ const NO_PURPOSES: Partial<TeamGenes> = {
     preserve: false,
     sacrifice: false,
     counter: false,
+    doubleSwitch: false,
     entryAbility: false,
     support: false,
     ppLoop: false,

@@ -82,6 +82,7 @@ const onlyPurpose = (purpose: TeamPurpose): Record<TeamPurpose, boolean> => ({
   preserve: purpose === 'preserve',
   sacrifice: purpose === 'sacrifice',
   counter: purpose === 'counter',
+  doubleSwitch: purpose === 'doubleSwitch',
   entryAbility: purpose === 'entryAbility',
   support: purpose === 'support',
   ppLoop: purpose === 'ppLoop',
