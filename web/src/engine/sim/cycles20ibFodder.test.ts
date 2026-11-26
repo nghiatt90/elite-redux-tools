@@ -8,7 +8,12 @@ import type { PlayerMonSpec } from './driver/buildParty'
 import type { PlayerChoice } from './driver/expectimax'
 import { loadSimData, type TrainerData, type TrainerMonData } from './driver/loadSimData'
 import type { PolicyTraceEntry } from './driver/policyBattle'
-import { highestRoll, rangeOnOurReserve } from './driver/rolePolicy'
+import {
+  highestRoll,
+  lowestRoll,
+  rangeOnOurReserve,
+  readPredictions,
+} from './driver/rolePolicy'
 import { aiDamageDepsFor, beginTurn, createSession, stepTurn } from './driver/session'
 import type { BattleSession } from './driver/session'
 import {
@@ -17,6 +22,7 @@ import {
   DEFAULT_TEAM_GENES,
   isGoodCounter,
   isStrictlyLessUseful,
+  monUsefulness,
   scoreBench,
 } from './driver/teamLayer'
 import { createRandomSource } from './rng'
@@ -157,6 +163,15 @@ describe('cycle s20ib - team layer fodder: a state, not a role', () => {
     patchMon(s.state, 0, 0, { hp: 20 })
 
     beginTurn(s)
+    // Exception (a) ranks the bench pool by usefulness; the pool is only slot 2.
+    // Slot 2 Donphan at full HP: (165 / 165) * min(1, 25.4375 / 150) = 0.169583
+    // (Tackle's accuracy-weighted mean damage is 25.4375 against foe HP 150),
+    // and Tackle cannot KO, so `capable` is false.
+    const view = readPredictions(s, 50)
+    const donphan = monUsefulness(s, 2, view)
+    expect(donphan.capable).toBe(false)
+    expect(donphan.damageFraction).toBeCloseTo(0.169583, 5)
+
     const trace: PolicyTraceEntry[] = []
     const choice = layer.policy(s, 1, trace)
     expect(trace[0]!.tags).toEqual(['team', 'sacrifice'])
@@ -172,10 +187,12 @@ describe('cycle s20ib - team layer fodder: a state, not a role', () => {
     // Active is Snorlax (preserve: 0, purposeFlags.preserve: false).
     // Bench:
     // Slot 1: Aggron (unsafe good counter).
-    // Slot 2: Capable mon with Reflect (pending screen), but very low HP and low damage,
-    //         so (hp / maxHp) * (damage / theirHp) is very low (~0.003).
-    // Slot 3: Non-capable mon with no screen, full HP and moderate damage (~0.233).
-    // Second key alone would choose slot 2 (0.003 < 0.233), but first key makes slot 3 less useful.
+    // Slot 2: Capable mon with Reflect (pending screen), but very low HP and low
+    //         damage: (5 / 165) * min(1, 25.4375 / 150) = 0.005139.
+    // Slot 3: Non-capable mon with no screen, full HP and moderate damage:
+    //         (235 / 235) * min(1, 69 / 150) = 0.46.
+    // Second key alone would choose slot 2 (0.005139 < 0.46), but first key
+    // makes slot 3 (not capable) the fodder and slot 2 the one to keep.
     const layer = createTeamLayer({
       roles: ['attacker', 'setupSweeper', 'support', 'attacker'],
       genes: {
@@ -199,6 +216,23 @@ describe('cycle s20ib - team layer fodder: a state, not a role', () => {
     patchMon(s.state, 0, 2, { hp: 5 })
 
     beginTurn(s)
+    const view = readPredictions(s, 50)
+    // Active Snorlax at 20/235: (20 / 235) * min(1, 69 / 150) = 0.039149.
+    const active = monUsefulness(s, 0, view)
+    expect(active.capable).toBe(false)
+    expect(active.damageFraction).toBeCloseTo(0.039149, 5)
+    // Slot 2 Donphan at 5/165 with Reflect: (5 / 165) * min(1, 25.4375 / 150)
+    // = 0.005139, and Reflect is a pending effect, so it is capable.
+    const donphan = monUsefulness(s, 2, view)
+    expect(donphan.capable).toBe(true)
+    expect(donphan.damageFraction).toBeCloseTo(0.005139, 5)
+    // Slot 3 Snorlax at full 235/235: (235 / 235) * min(1, 69 / 150) = 0.46.
+    const benchSnorlax = monUsefulness(s, 3, view)
+    expect(benchSnorlax.capable).toBe(false)
+    expect(benchSnorlax.damageFraction).toBeCloseTo(0.46, 5)
+    // The second key alone prefers slot 2, but capacity is the first key.
+    expect(donphan.damageFraction).toBeLessThan(benchSnorlax.damageFraction)
+
     const trace: PolicyTraceEntry[] = []
     const choice = layer.policy(s, 1, trace)
     expect(trace[0]!.tags).toEqual(['team', 'sacrifice'])
@@ -215,8 +249,10 @@ describe('cycle s20ib - team layer fodder: a state, not a role', () => {
       genes: { switchInSafety: 3 },
     })
 
-    // Positive: Active Snorlax is at 160/160 HP, Body Slam ~70 dmg -> damageFraction ~0.467.
-    // Bench Donphan is at 5/165 HP with Tackle ~10 dmg -> damageFraction ~0.002.
+    // Positive: Active Snorlax is at 160/235 HP:
+    //   (160 / 235) * min(1, 69 / 150) = 0.313191, not capable.
+    // Bench Donphan is at 5/165 HP with Tackle:
+    //   (5 / 165) * min(1, 25.4375 / 150) = 0.005139, not capable.
     // Donphan is strictly less useful than active Snorlax -> switches in Donphan.
     const sPos = session(
       [OUR_SNORLAX, OUR_AGGRON, { species: 'SPECIES_DONPHAN', level: 50, moves: ['MOVE_TACKLE'] }],
@@ -227,14 +263,24 @@ describe('cycle s20ib - team layer fodder: a state, not a role', () => {
     patchMon(sPos.state, 0, 2, { hp: 5 })
 
     beginTurn(sPos)
+    const viewPos = readPredictions(sPos, 50)
+    const activePos = monUsefulness(sPos, 0, viewPos)
+    expect(activePos.capable).toBe(false)
+    expect(activePos.damageFraction).toBeCloseTo(0.313191, 5)
+    const donphanPos = monUsefulness(sPos, 2, viewPos)
+    expect(donphanPos.capable).toBe(false)
+    expect(donphanPos.damageFraction).toBeCloseTo(0.005139, 5)
+
     const tracePos: PolicyTraceEntry[] = []
     const choicePos = layer.policy(sPos, 1, tracePos)
     expect(tracePos[0]!.tags).toEqual(['team', 'sacrifice'])
     expect(choicePos!.action.action).toBe('SWITCH')
     expect(choicePos!.switchTo).toBe(2)
 
-    // Negative: Active Snorlax is at 5/160 HP -> damageFraction ~0.015.
-    // Bench Donphan is at full HP (165/165) with Body Slam -> damageFraction ~0.467.
+    // Negative: Active Snorlax is at 5/235 HP:
+    //   (5 / 235) * min(1, 69 / 150) = 0.009787, not capable.
+    // Bench Donphan is at full HP (165/165) with Body Slam:
+    //   (165 / 165) * min(1, 53.1875 / 150) = 0.354583, not capable.
     // Bench Donphan is MORE useful than active Snorlax -> active Snorlax stays in.
     const sNeg = session(
       [OUR_SNORLAX, OUR_AGGRON, { species: 'SPECIES_DONPHAN', level: 50, moves: ['MOVE_BODY_SLAM'] }],
@@ -244,6 +290,15 @@ describe('cycle s20ib - team layer fodder: a state, not a role', () => {
     patchMon(sNeg.state, 0, 0, { hp: 5 })
 
     beginTurn(sNeg)
+    const viewNeg = readPredictions(sNeg, 50)
+    const activeNeg = monUsefulness(sNeg, 0, viewNeg)
+    expect(activeNeg.capable).toBe(false)
+    expect(activeNeg.damageFraction).toBeCloseTo(0.009787, 5)
+    const donphanNeg = monUsefulness(sNeg, 2, viewNeg)
+    expect(donphanNeg.capable).toBe(false)
+    expect(donphanNeg.damageFraction).toBeCloseTo(0.354583, 5)
+    expect(activeNeg.damageFraction).toBeLessThan(donphanNeg.damageFraction)
+
     const traceNeg: PolicyTraceEntry[] = []
     const choiceNeg = layer.policy(sNeg, 1, traceNeg)
     expect(traceNeg[0]!.tags).toEqual(['team', 'sacrifice'])
@@ -258,6 +313,16 @@ describe('cycle s20ib - team layer fodder: a state, not a role', () => {
     patchMon(s.state, 0, 0, { hp: 20 })
 
     beginTurn(s)
+    // Aggron's incoming highest roll is 5; 5 * 100 = 500 <= 20 * 145 = 2900,
+    // so the predicted move costs at most 20% of its current HP.
+    const incoming = rangeOnOurReserve(s, 'MOVE_BODY_SLAM', 1)!
+    expect(highestRoll(incoming)).toBe(5)
+    expect(highestRoll(incoming) * 100).toBeLessThanOrEqual(20 * AGGRON_MAX_HP)
+    // Iron Head's lowest roll is 78; 2 * 78 = 156 >= foe HP 150, a good counter.
+    const scored = scoreBench(s, 1, ['MOVE_BODY_SLAM'], 20)!
+    expect(scored.lowestRoll).toBe(78)
+    expect(2 * scored.lowestRoll).toBeGreaterThanOrEqual(150)
+
     const trace: PolicyTraceEntry[] = []
     const choice = layer.policy(s, 1, trace)
     expect(trace[0]!.tags).toEqual(['team', 'counter'])
@@ -275,6 +340,17 @@ describe('cycle s20ib - team layer fodder: a state, not a role', () => {
     patchMon(s.state, 0, 0, { hp: 20 })
 
     beginTurn(s)
+    // Aggron's incoming highest roll is 5; 5 * 100 = 500 > 3 * 145 = 435,
+    // so it cannot enter safely at switchInSafety: 3.
+    const incoming = rangeOnOurReserve(s, 'MOVE_BODY_SLAM', 1)!
+    expect(highestRoll(incoming)).toBe(5)
+    expect(highestRoll(incoming) * 100).toBeGreaterThan(3 * AGGRON_MAX_HP)
+    // Iron Head's lowest roll is 78; 2 * 78 = 156 < foe HP 165, so Aggron is
+    // an unsafe switch-in that is not even a good counter: sacrifice cannot fire.
+    const scored = scoreBench(s, 1, ['MOVE_BODY_SLAM'], 3)!
+    expect(scored.lowestRoll).toBe(78)
+    expect(2 * scored.lowestRoll).toBeLessThan(165)
+
     const trace: PolicyTraceEntry[] = []
     const choice = layer.policy(s, 1, trace)
     expect(trace[0]!.tags).not.toEqual(['team', 'sacrifice'])
@@ -292,6 +368,13 @@ describe('cycle s20ib - team layer fodder: a state, not a role', () => {
     patchMon(s.state, 1, 0, { hp: 20, maxHp: 165 })
 
     beginTurn(s)
+    // Snorlax Body Slam's lowest roll is 63, and 63 >= foe HP 20, so the active
+    // mon has a guaranteed KO (stay test true).
+    const deps = aiDamageDepsFor(data, s.state, s.inverseBattle)
+    const bodySlam = aiDamageRolls(s.state, 'MOVE_BODY_SLAM', 0, 1, deps)!
+    expect(lowestRoll(bodySlam)).toBe(63)
+    expect(lowestRoll(bodySlam)).toBeGreaterThanOrEqual(20)
+
     const trace: PolicyTraceEntry[] = []
     const choice = layer.policy(s, 1, trace)
     expect(trace[0]!.tags).not.toEqual(['team', 'sacrifice'])
@@ -299,13 +382,19 @@ describe('cycle s20ib - team layer fodder: a state, not a role', () => {
   })
 
   it('case 8: preserve slot is never picked as bench fodder', () => {
-    // Preserve is slot 2 (Donphan). Slot 3 is Jolteon.
-    // Active Snorlax is at 160 HP. Both Donphan and Jolteon are at 5 HP with Tackle (strictly less useful).
-    // Slot 2 would rank before slot 3 by lower slot, but slot 2 is preserve, so slot 3 is picked.
+    // Preserve is slot 3 (Jolteon). Slot 2 is Donphan.
+    // Active Snorlax is at 160/235 HP:
+    //   (160 / 235) * min(1, 69 / 150) = 0.313191.
+    // Both bench mons are at 5 HP with Tackle and not capable:
+    //   Donphan (slot 2): (5 / 165) * min(1, 25.4375 / 150) = 0.005139.
+    //   Jolteon (slot 3): (5 / 140) * min(1, 14.3125 / 150) = 0.003408.
+    // Jolteon is the less useful of the two, so it would rank first as fodder
+    // and the lower slot would NOT break the tie; excluding the preserve slot 3
+    // is the only thing that makes the switch land on slot 2.
     const layer = createTeamLayer({
       roles: ['attacker', 'setupSweeper', 'attacker', 'attacker'],
       genes: {
-        preserve: 2,
+        preserve: 3,
         switchInSafety: 3,
       },
     })
@@ -324,11 +413,27 @@ describe('cycle s20ib - team layer fodder: a state, not a role', () => {
     patchMon(s.state, 0, 3, { hp: 5 })
 
     beginTurn(s)
+    const view = readPredictions(s, 50)
+    const active = monUsefulness(s, 0, view)
+    const donphan = monUsefulness(s, 2, view)
+    const jolteon = monUsefulness(s, 3, view)
+    expect(active.capable).toBe(false)
+    expect(active.damageFraction).toBeCloseTo(0.313191, 5)
+    expect(donphan.capable).toBe(false)
+    expect(donphan.damageFraction).toBeCloseTo(0.005139, 5)
+    expect(jolteon.capable).toBe(false)
+    expect(jolteon.damageFraction).toBeCloseTo(0.003408, 5)
+    // Jolteon would rank first (less useful), and both bench mons are less
+    // useful than the active mon, so exception (b) wants to switch.
+    expect(isStrictlyLessUseful(jolteon, donphan)).toBe(true)
+    expect(isStrictlyLessUseful(donphan, active)).toBe(true)
+    expect(isStrictlyLessUseful(jolteon, active)).toBe(true)
+
     const trace: PolicyTraceEntry[] = []
     const choice = layer.policy(s, 1, trace)
     expect(trace[0]!.tags).toEqual(['team', 'sacrifice'])
     expect(choice!.action.action).toBe('SWITCH')
-    expect(choice!.switchTo).toBe(3)
+    expect(choice!.switchTo).toBe(2)
   })
 
   it('case 9: live session and RNG are unchanged after a policy call evaluating bench probes', () => {

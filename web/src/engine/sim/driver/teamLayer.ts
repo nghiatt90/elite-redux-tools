@@ -611,19 +611,6 @@ export interface StayDecision {
   outspeedsWithKo: boolean
 }
 
-/**
- * Stay test: switching gives the opponent a free hit, so never switch when we
- * can KO.
- *
- * Checks candidate moves from `evaluateMoves(session, null)` (active mon vs
- * battler 1). A move qualifies as a KO move when:
- *   koProbability(damageDistribution(info.range), theirActiveHp(session)) * (info.accuracy / 100) >= STAY_KO_CHANCE
- *
- * Fake Out off the first turn is excluded.
- *
- * The active mon STAYS when some KO move satisfies:
- *   outspeeds(session, thatMove.choice.action, view.predictedAction) OR !view.koThreat
- */
 /** Whether a move qualifies as a KO move under the stay / usefulness test. */
 export function isKoMove(
   session: BattleSession,
@@ -640,6 +627,19 @@ export function isKoMove(
   return koChance >= STAY_KO_CHANCE
 }
 
+/**
+ * Stay test: switching gives the opponent a free hit, so never switch when we
+ * can KO.
+ *
+ * Checks candidate moves from `evaluateMoves(session, null)` (active mon vs
+ * battler 1). A move qualifies as a KO move when:
+ *   koProbability(damageDistribution(info.range), theirActiveHp(session)) * (info.accuracy / 100) >= STAY_KO_CHANCE
+ *
+ * Fake Out off the first turn is excluded.
+ *
+ * The active mon STAYS when some KO move satisfies:
+ *   outspeeds(session, thatMove.choice.action, view.predictedAction) OR !view.koThreat
+ */
 export function stayTest(
   session: BattleSession,
   view: PredictionView,
@@ -700,7 +700,7 @@ export function isGoodCounter(
   return 2 * score.lowestRoll >= theirHp || benchFastHeavy(session, slot, theirHp, predictedAction)
 }
 
-// s20ic plugs in here: entry abilities that trigger on switch-in rank first as fodder.
+// s20ic plugs in here: a bench mon whose ability or innate fires usefully when it is HIT, TOUCHED or FAINTS ranks first as fodder.
 function fodderAbilityTrigger(
   _session: BattleSession,
   _slot: number,
@@ -802,8 +802,6 @@ export function compareUsefulness(a: MonUsefulness, b: MonUsefulness): number {
   }
   return 0
 }
-
-export const compareFodder = compareUsefulness
 
 function rankBenchFodder(
   session: BattleSession,
