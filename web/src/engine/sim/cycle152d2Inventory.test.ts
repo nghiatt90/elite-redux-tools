@@ -267,10 +267,14 @@ describe('cycle 152d2 - negatives and pinned counts', () => {
     // Cycle 152h: BattleScript_MoveEffectBugBite (attacker consumeberry) ported, ported 402 -> 403,
     // unported 214 -> 213.
     // Cycle 152i: +1 Enigma ShouldUseItem:1127 allowlisted unit (battle_ai_switch_items.c:1127) = 637 defined.
+    // Cycle s20l: ported 403 -> 408, unported 213 -> 208, registered-untested 27 -> 24.
+    // Macho Brace, Power Item and Quick Powder gained a test that names their token;
+    // SetActionsAndBattlersTurnOrder now maps to turn.ts too, crediting its
+    // HOLD_EFFECT_QUICK_CLAW and HOLD_EFFECT_CUSTAP_BERRY units.
     expect(result.totalDefined).toBe(637)
-    expect(result.totalPorted).toBe(403)
-    expect(result.totalUnported).toBe(213)
-    expect(result.totalRegisteredUntested).toBe(27)
+    expect(result.totalPorted).toBe(408)
+    expect(result.totalUnported).toBe(208)
+    expect(result.totalRegisteredUntested).toBe(24)
     expect(result.totalAllowlisted).toBe(21)
     expect(result.totalUnclassified).toBe(0)
   })

@@ -5776,14 +5776,41 @@ export function executeTurn(state: BattleState, actions: (ChosenAction | null)[]
   clearStartedFlags(state)
   actions = actions.map((a, id) => applyEncore(state, id, applyLockedMove(state, id, a, deps), deps))
 
-  // TurnBasedPriority (battle_main.c:4411-4414) -- Custap Berry
+  // Start-of-turn Speed-granting rolls, one else-if chain per battler in battler id
+  // order -- SetActionsAndBattlersTurnOrder, battle_main.c:4400-4414:
+  //
+  //   if (!IsBattlerAlive(i)) continue;
+  //   else if (BattlerHasAbility(i, ABILITY_QUICK_DRAW, TRUE) && (Random() % 100) < 30) quickDraw = TRUE;
+  //   else if (GetBattlerHoldEffect(i, TRUE) == HOLD_EFFECT_QUICK_CLAW && (Random() % 100) < GetBattlerHoldEffectParam(i)) usedCustapBerry = TRUE;
+  //   else if (!IsUnnerveAbilityOnOpposingSide(i) && GetBattlerHoldEffect(i, TRUE) == HOLD_EFFECT_CUSTAP_BERRY
+  //            && HasEnoughHpToEatBerry(i, 4, gBattleMons[i].item)) usedCustapBerry = TRUE;
+  //
+  // `&&` short-circuits in the C too, so only a holder draws: a Quick Draw holder whose
+  // roll fails falls through and draws again for a Quick Claw it also holds, and a
+  // battler holding neither item draws nothing. A Quick Draw success never reaches the
+  // item branches (that is the else-if, not an independent check).
   for (let i = 0; i < state.battlersCount; i++) {
     const b = state.battlers[i]
     if (!b || b.mon.hp === 0) continue
     const holdEffect = deps.grounding.holdEffectOf(i)
+    // BattlerHasAbility(i, ABILITY_QUICK_DRAW, TRUE): the holder is its own attacker, so
+    // IsSuppressed's Mold Breaker half cannot apply (battle_util.c:9253-9261); the
+    // Neutralizing Gas / Gastro Acid half still does.
     if (
-      holdEffect === 'HOLD_EFFECT_CUSTAP_BERRY' &&
-      !isUnnerveAbilityOnOpposingSide(state, i, deps.dataContext)
+      battlerHasSimAbility(state, b, 'ABILITY_QUICK_DRAW', true, i, false, deps.dataContext) &&
+      state.rng.random16() % 100 < 30
+    ) {
+      b.round.quickDraw = true
+    } else if (
+      holdEffect === 'HOLD_EFFECT_QUICK_CLAW' &&
+      // GetBattlerHoldEffectParam(i) -- gItems[item].holdEffectParam, items.json's
+      // holdEffectStrength (20 for ITEM_QUICK_CLAW). Not hard-coded (aiCalcDamage.ts:84).
+      state.rng.random16() % 100 < (b.mon.itemId ? (deps.dataContext.item(b.mon.itemId)?.holdEffectStrength ?? 0) : 0)
+    ) {
+      b.round.usedCustapBerry = true
+    } else if (
+      !isUnnerveAbilityOnOpposingSide(state, i, deps.dataContext) &&
+      holdEffect === 'HOLD_EFFECT_CUSTAP_BERRY'
     ) {
       const hasGluttony = battlerHasSimAbility(state, b, 'ABILITY_GLUTTONY', false, i, false, deps.dataContext)
       const threshold = Math.floor(b.mon.maxHp / (hasGluttony ? 2 : 4))

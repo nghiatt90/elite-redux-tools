@@ -531,7 +531,10 @@ export const C_SITE_SIM_MAP: Record<string, SitePortTarget> = {
     files: ['web/src/engine/sim/hazards.ts'],
   },
   SetActionsAndBattlersTurnOrder: {
-    files: ['web/src/engine/sim/turnOrder.ts'],
+    // The C function both rolls Quick Draw / Quick Claw / Custap (battle_main.c:4400-4414,
+    // ported in turn.ts's executeTurn since cycle s20l) and sorts the actions
+    // (turnOrder.ts's setActionsAndBattlersTurnOrder).
+    files: ['web/src/engine/sim/turnOrder.ts', 'web/src/engine/sim/turn.ts'],
   },
   GetMoveSpeed: {
     files: ['web/src/engine/sim/turnOrder.ts'],

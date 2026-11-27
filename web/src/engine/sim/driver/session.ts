@@ -22,7 +22,7 @@ import type { GroundingContext } from '../grounding'
 import { battlerHasSimAbility, runReactiveAbilityEffects } from '../statBuffs'
 import { hasEmbargo } from '../unpack'
 import type { SimDataContext } from '../dataContext'
-import type { ChosenAction, TurnOrderMoveView } from '../turnOrder'
+import type { ChosenAction, TurnOrderContext, TurnOrderMoveView } from '../turnOrder'
 import { naturalGiftPriority } from '../turnOrder'
 import { isKeenEdgeMove, type StatusDeps } from '../statusEffects'
 import { getOpponentSelectedMoveTarget, getPartnerSelectedMoveTarget, getPlayerSelectedMoveTarget, playerCanSelectMoveTarget } from '../moveTargetFlags'
@@ -133,10 +133,17 @@ export function groundingFor(data: SimDataBundle, state: BattleState): Grounding
   return { ...data.grounding, holdEffectOf: (battlerId) => holdEffectOfBattler(state, battlerId, data.dataContext) }
 }
 
+/** The shared turn-order context with `holdEffectOf` bound to this state. The bundle's own context carries
+ * NEUTRAL_TURN_ORDER_CONTEXT's `() => null`, which switched off every item effect read through turn order
+ * (Choice Scarf, Iron Ball, Macho Brace / power items, Quick Powder, Lagging Tail / Full Incense). */
+export function turnOrderFor(data: SimDataBundle, state: BattleState): TurnOrderContext {
+  return { ...data.turnOrder, holdEffectOf: (battlerId) => holdEffectOfBattler(state, battlerId, data.dataContext) }
+}
+
 export function aiDamageDepsFor(data: SimDataBundle, state: BattleState, inverseBattle = false): AiDamageDeps {
   return {
     grounding: groundingFor(data, state),
-    turnOrder: data.turnOrder,
+    turnOrder: turnOrderFor(data, state),
     statStageRatios: data.statStageRatios,
     dataContext: data.dataContext,
     inverseBattle,
@@ -246,10 +253,11 @@ function buildDeps(
 ): { turnDeps: TurnLoopDeps; chooseAiDeps: ChooseAiActionDeps } {
   const random: RandomSource = { random16: () => state.rng.random16() }
   const grounding = groundingFor(data, state)
+  const turnOrder = turnOrderFor(data, state)
   const damageResolver = createBridgeDamageResolver({
     dataContext: data.dataContext,
     grounding,
-    turnOrder: data.turnOrder,
+    turnOrder,
     statStageRatios: data.statStageRatios,
     inverseBattle,
     moveData: data.moveData,
@@ -276,7 +284,7 @@ function buildDeps(
   }
 
   const turnDeps: TurnLoopDeps = {
-    turnOrder: data.turnOrder,
+    turnOrder,
     grounding,
     damage: damageResolver,
     statStageRatios: data.statStageRatios,
@@ -435,7 +443,7 @@ export function createSession(options: SessionOptions): BattleSession {
     {
       grounding: groundingFor(data, state),
       dataContext: data.dataContext,
-      turnOrder: data.turnOrder,
+      turnOrder: turnOrderFor(data, state),
       statStageRatios: data.statStageRatios,
       drainQueuedExtraAttacks: (order) => drainQueuedExtraAttacks(state, 0, order, turnDeps, startOutcomes),
     },

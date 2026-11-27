@@ -268,8 +268,12 @@ export interface TurnOrderContext {
  *
  * The same caveat applies to `applySpeedAbilities` and `holdEffectOf`, but less
  * sharply: those default to "the effect is absent", so their failure is a
- * missing behaviour rather than a wrong number. See TurnOrderContext's
- * isBattlerGrounded doc for the rule. */
+ * missing behaviour rather than a wrong number. `holdEffectOf` here returns null
+ * for every battler; a real battle binds the state's live hold effect through
+ * session.ts's `turnOrderFor(data, state)` (the port of
+ * GetBattlerHoldEffect(b, TRUE), battle_util.c:6526-6537), so Choice Scarf,
+ * Iron Ball, the Macho Brace / power items, Quick Powder and Lagging Tail apply.
+ * See TurnOrderContext's isBattlerGrounded doc for the rule. */
 export const NEUTRAL_TURN_ORDER_CONTEXT: TurnOrderContext = {
   isTrickRoomActive: false,
   monotypeChampType: null,

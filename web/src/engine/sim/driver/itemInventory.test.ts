@@ -47,11 +47,16 @@ const MEGA_STONE_UNITS = 270
 // Cycle 152f: -1, Natural Gift's GetMovePriority unit is ported (naturalGiftPriority
 // computed from the holder's item instead of hardcoded 0).
 // Cycle 152h: -1, BattleScript_MoveEffectBugBite's attacker consumeberry is ported in applyBugBite.
-export const UNPORTED_UNIT_COUNT = 213
+// Cycle s20l: -5. Macho Brace, Power Item and Quick Powder gain a test that names their
+// token (three registered-untested units become ported); the
+// SetActionsAndBattlersTurnOrder site now maps to turn.ts as well, crediting its
+// HOLD_EFFECT_QUICK_CLAW and HOLD_EFFECT_CUSTAP_BERRY units.
+export const UNPORTED_UNIT_COUNT = 208
 
 // Re-pinned after cycle 152c: stricter fling test requirements and natural-gift per-site units
 // Cycle 156: -1, Binding Band (`battle_util.c:2682`) gained a test.
-export const REGISTERED_UNTESTED_UNIT_COUNT = 27
+// Cycle s20l: -3. Macho Brace, Power Item and Quick Powder are now named by a test.
+export const REGISTERED_UNTESTED_UNIT_COUNT = 24
 
 /**
  * Re-pinned after cycle 152d4: 5 cycle-152d2 item-data units + 11 Enigma Berry

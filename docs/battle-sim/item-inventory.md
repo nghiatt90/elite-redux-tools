@@ -56,13 +56,13 @@ unit kind for them.
 
 | Unit kind | Defined | Ported | Registered, untested | Unported | Unclassified | Allowlisted |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `hold-trigger` | 250 | 113 | 19 | 125 | 0 | 12 |
+| `hold-trigger` | 250 | 118 | 16 | 120 | 0 | 12 |
 | `ai-trigger` | 61 | 17 | 0 | 44 | 0 | 0 |
 | `item-data` | 40 | 0 | 0 | 35 | 0 | 5 |
 | `natural-gift` | 5 | 5 | 0 | 0 | 0 | 0 |
 | `fling` | 11 | 2 | 8 | 9 | 0 | 0 |
 | `mega-stone` | 270 | 266 | 0 | 0 | 0 | 4 |
-| **total** | **637** | **403** | **27** | **213** | **0** | **21** |
+| **total** | **637** | **408** | **24** | **208** | **0** | **21** |
 
 Items in `data/v2.65beta/items.json`: 929; distinct non-`HOLD_EFFECT_NONE` resolved hold effects: 133.
 
@@ -105,7 +105,6 @@ Test evidence is per effect token or item id, not per site.
 | `hold-trigger` | `DoBattlerEndTurnEffects` | 1 |
 | `hold-trigger` | `DoesBattlerHaveAbilityShield` | 1 |
 | `hold-trigger` | `ENDTURN_ITEMS1/2` | 25 |
-| `hold-trigger` | `GetBattlerTotalSpeedStat` | 3 |
 | `hold-trigger` | `GetBattlerWeight` | 1 |
 | `hold-trigger` | `GetEvolutionTargetSpecies` | 1 |
 | `hold-trigger` | `GetMonMoveType` | 1 |
@@ -117,7 +116,6 @@ Test evidence is per effect token or item id, not per site.
 | `hold-trigger` | `IsBattlerWeatherAffected` | 1 |
 | `hold-trigger` | `IsRunningFromBattleImpossible` | 1 |
 | `hold-trigger` | `PlayStatChangeAnimation` | 1 |
-| `hold-trigger` | `SetActionsAndBattlersTurnOrder` | 2 |
 | `hold-trigger` | `SetMoveEffect` | 1 |
 | `hold-trigger` | `SetSwapDamageCategory` | 1 |
 | `hold-trigger` | `TryRunFromBattle` | 1 |
@@ -216,7 +214,7 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_CURE_STATUS@battle_util.c:ITEMEFFECT_MOVE_END` | Lum Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:5975` | ported | `web/src/engine/sim/cycle110cHeldItems.test.ts` |
 | `HOLD_EFFECT_CURE_STATUS@battle_util.c:ITEMEFFECT_ON_SWITCH_IN` | Lum Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:5520` | ported | `web/src/engine/sim/cycle110cHeldItems.test.ts` |
 | `HOLD_EFFECT_CUSTAP_BERRY@battle_main.c:CheckQuickClaw_CustapBerryActivation` | Custap Berry | `pipeline/.upstream/eliteredux-source/src/battle_main.c:4616` | unported | `web/src/engine/sim/heldItems.test.ts` |
-| `HOLD_EFFECT_CUSTAP_BERRY@battle_main.c:SetActionsAndBattlersTurnOrder` | Custap Berry | `pipeline/.upstream/eliteredux-source/src/battle_main.c:4411` | unported | `web/src/engine/sim/heldItems.test.ts` |
+| `HOLD_EFFECT_CUSTAP_BERRY@battle_main.c:SetActionsAndBattlersTurnOrder` | Custap Berry | `pipeline/.upstream/eliteredux-source/src/battle_main.c:4411` | ported | `web/src/engine/sim/heldItems.test.ts` |
 | `HOLD_EFFECT_DAMP_ROCK@battle_util.c:sWeatherFlagsInfo` | Damp Rock | `pipeline/.upstream/eliteredux-source/src/battle_util.c:3711` | ported | `web/src/engine/sim/cycle115bFieldEffects.test.ts` |
 | `HOLD_EFFECT_DEEP_SEA_SCALE@battle_util.c:CalcDefenseStat` | DeepSeaScale | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7415` | unported (registered, untested) | none |
 | `HOLD_EFFECT_DEEP_SEA_TOOTH@battle_util.c:CalcAttackStat` | DeepSeaTooth | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7268` | unported (registered, untested) | none |
@@ -261,7 +259,7 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_IRON_BALL@battle_util.c:CheckGroundingEffects` | Iron Ball | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6648` | ported | `web/src/engine/abilities/impl/04-crit-a.test.ts` |
 | `HOLD_EFFECT_JABOCA_BERRY@battle_util.c:ITEMEFFECT_TARGET` | Jaboca Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6205` | unported | none |
 | `HOLD_EFFECT_KEE_BERRY@battle_util.c:ITEMEFFECT_TARGET` | Kee Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6231` | unported | none |
-| `HOLD_EFFECT_LAGGING_TAIL@battle_main.c:GetMoveSpeed` | Full Incense, Lagging Tail | `pipeline/.upstream/eliteredux-source/src/battle_main.c:4318` | ported | `web/src/engine/sim/turnOrder.test.ts` |
+| `HOLD_EFFECT_LAGGING_TAIL@battle_main.c:GetMoveSpeed` | Full Incense, Lagging Tail | `pipeline/.upstream/eliteredux-source/src/battle_main.c:4318` | ported | `web/src/engine/sim/cycles20lItemTurnOrder.test.ts` |
 | `HOLD_EFFECT_LEEK@battle_script_commands.c:BENEFITS_FROM_LEEK` | Leek | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:1518` | unported | none |
 | `HOLD_EFFECT_LEEK@battle_util.c:CalcAttackStat` | Leek | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7285` | unported (registered, untested) | none |
 | `HOLD_EFFECT_LEFTOVERS@battle_util.c:ENDTURN_ITEMS1/2` | Leftovers | `pipeline/.upstream/eliteredux-source/src/battle_util.c:5706` | ported | `web/src/engine/basePower.test.ts` |
@@ -279,7 +277,7 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_LUCKY_EGG@battle_script_commands.c:Cmd_getexp` | Lucky Egg | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:3536` | unported | none |
 | `HOLD_EFFECT_LUCKY_PUNCH@battle_script_commands.c:CalcCritChanceStage` | Lucky Punch | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:1548` | unported | `web/src/engine/calculate.test.ts` |
 | `HOLD_EFFECT_LUMINOUS_MOSS@battle_util.c:ITEMEFFECT_TARGET` | Luminous Moss | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6184` | unported | none |
-| `HOLD_EFFECT_MACHO_BRACE@battle_main.c:GetBattlerTotalSpeedStat` | Macho Brace | `pipeline/.upstream/eliteredux-source/src/battle_main.c:4216` | unported (registered, untested) | none |
+| `HOLD_EFFECT_MACHO_BRACE@battle_main.c:GetBattlerTotalSpeedStat` | Macho Brace | `pipeline/.upstream/eliteredux-source/src/battle_main.c:4216` | ported | `web/src/engine/sim/cycles20lItemTurnOrder.test.ts` |
 | `HOLD_EFFECT_MARANGA_BERRY@battle_util.c:ITEMEFFECT_TARGET` | Maranga Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6234` | unported | none |
 | `HOLD_EFFECT_MEGA_STONE@battle_util.c:CanBattlerGetOrLoseItem` | Abomasite, Abomasite S, Absolite, Absolite Z, Aegislashite R +265 | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8259` | ported | `web/src/engine/sim/cycle110bHeldItems.test.ts` |
 | `HOLD_EFFECT_MEMORY@battle_main.c:CHANGE_TYPE_ON_ITEM:5036` | Bug Memory, Dark Memory, Dragon Memory, ElectrcMemory, Fairy Memory +12 | `pipeline/.upstream/eliteredux-source/src/battle_main.c:5036` | ported | `web/src/engine/calculate.test.ts` |
@@ -305,7 +303,7 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_EffectTwoTurnSecondary_AfterSetString` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4409` | ported | `web/src/engine/sim/cycle152d3Enigma.test.ts` |
 | `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_EffectTwoTurnsAttackCheckSkipCharge` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:4449` | ported | `web/src/engine/sim/cycle152d3Enigma.test.ts` |
 | `HOLD_EFFECT_POWER_HERB@battle_scripts_1.s:BattleScript_FirstTurnSemiInvulnerable` | Power Herb | `pipeline/.upstream/eliteredux-source/data/battle_scripts_1.s:5879` | ported | `web/src/engine/sim/cycle152d3Enigma.test.ts` |
-| `HOLD_EFFECT_POWER_ITEM@battle_main.c:GetBattlerTotalSpeedStat` | Power Anklet, Power Band, Power Belt, Power Bracer, Power Lens +1 | `pipeline/.upstream/eliteredux-source/src/battle_main.c:4216` | unported (registered, untested) | none |
+| `HOLD_EFFECT_POWER_ITEM@battle_main.c:GetBattlerTotalSpeedStat` | Power Anklet, Power Band, Power Belt, Power Bracer, Power Lens +1 | `pipeline/.upstream/eliteredux-source/src/battle_main.c:4216` | ported | `web/src/engine/sim/cycles20lItemTurnOrder.test.ts` |
 | `HOLD_EFFECT_PREVENT_EVOLVE@pokemon.c:GetEvolutionTargetSpecies` | Everstone | `pipeline/.upstream/eliteredux-source/src/pokemon.c:3155` | unported | none |
 | `HOLD_EFFECT_PRIMAL_ORB@battle_script_commands.c:Cmd_various` | Adamant Orb, Blue Orb, Dynamax Orb, Galactic Orb, Griseous Orb +12 | `pipeline/.upstream/eliteredux-source/src/battle_script_commands.c:7416` | unported | `web/src/engine/sim/cycle7PartnerController.test.ts` |
 | `HOLD_EFFECT_PRIMAL_ORB@battle_util.c:CanBattlerGetOrLoseItem` | Adamant Orb, Blue Orb, Dynamax Orb, Galactic Orb, Griseous Orb +12 | `pipeline/.upstream/eliteredux-source/src/battle_util.c:8257` | ported | `web/src/engine/sim/cycle7PartnerController.test.ts` |
@@ -314,8 +312,8 @@ One line per unit, sorted by unit key. `Items` lists the first five item names s
 | `HOLD_EFFECT_PROTECTIVE_PADS@battle_util.c:IsMoveMakingContact` | Protective Pads | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6562` | ported | `web/src/engine/sim/cycle91bAbilities.test.ts` |
 | `HOLD_EFFECT_PUNCHING_GLOVE@battle_util.c:CalcFinalDmg` | Punching Glove | `pipeline/.upstream/eliteredux-source/src/battle_util.c:7658` | ported | `web/src/engine/calculate.test.ts` |
 | `HOLD_EFFECT_PUNCHING_GLOVE@battle_util.c:IsMoveMakingContact` | Punching Glove | `pipeline/.upstream/eliteredux-source/src/battle_util.c:6564` | ported | `web/src/engine/calculate.test.ts` |
-| `HOLD_EFFECT_QUICK_CLAW@battle_main.c:SetActionsAndBattlersTurnOrder` | Quick Claw | `pipeline/.upstream/eliteredux-source/src/battle_main.c:4409` | unported | none |
-| `HOLD_EFFECT_QUICK_POWDER@battle_main.c:GetBattlerTotalSpeedStat` | Quick Powder | `pipeline/.upstream/eliteredux-source/src/battle_main.c:4222` | unported (registered, untested) | none |
+| `HOLD_EFFECT_QUICK_CLAW@battle_main.c:SetActionsAndBattlersTurnOrder` | Quick Claw | `pipeline/.upstream/eliteredux-source/src/battle_main.c:4409` | ported | `web/src/engine/sim/cycles20lItemTurnOrder.test.ts` |
+| `HOLD_EFFECT_QUICK_POWDER@battle_main.c:GetBattlerTotalSpeedStat` | Quick Powder | `pipeline/.upstream/eliteredux-source/src/battle_main.c:4222` | ported | `web/src/engine/sim/cycles20lItemTurnOrder.test.ts` |
 | `HOLD_EFFECT_RANDOM_STAT_UP@battle_util.c:ENDTURN_ITEMS1/2` | Starf Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:5756` | unported | none |
 | `HOLD_EFFECT_RANDOM_STAT_UP@battle_util.c:ITEMEFFECT_MOVE_END` | Starf Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:5922` | unported | none |
 | `HOLD_EFFECT_RANDOM_STAT_UP@battle_util.c:ITEMEFFECT_ON_SWITCH_IN` | Starf Berry | `pipeline/.upstream/eliteredux-source/src/battle_util.c:5481` | unported | none |

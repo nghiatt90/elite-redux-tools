@@ -81,7 +81,7 @@ import {
   supportEffectPending,
 } from './rolePolicy'
 import type { BattleSession } from './session'
-import { aiDamageDepsFor, beginTurn, cloneSession, firstLiveReplacement, stepTurn } from './session'
+import { aiDamageDepsFor, beginTurn, cloneSession, firstLiveReplacement, stepTurn, turnOrderFor } from './session'
 
 /** The seven voluntary-switching purposes of decision 14, all implemented. */
 export type TeamPurpose =
@@ -491,7 +491,7 @@ function entryProbeDeps(probe: BattleSession): BattleStartDeps {
   return {
     grounding: probe.turnDeps.grounding,
     dataContext: probe.data.dataContext,
-    turnOrder: probe.data.turnOrder,
+    turnOrder: turnOrderFor(probe.data, probe.state),
     statStageRatios: probe.data.statStageRatios,
   }
 }

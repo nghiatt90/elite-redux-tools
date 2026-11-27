@@ -343,11 +343,14 @@ describe('cycle 152d3 - Enigma Berry inventory units', () => {
     // file was reclassified as an AI source. 251 is the pre-152g count above.
     // Cycle 152h: Bug Bite / Pluck EatTargetBerry ported (battle_script_commands.c:13221-13234), ported 402 -> 403, unported 214 -> 213.
     // Cycle 152i: +1 Enigma ShouldUseItem:1127 allowlisted unit (battle_ai_switch_items.c:1127) = 250 hold-trigger, 637 defined, 21 allowlisted.
+    // Cycle s20l: ported 403 -> 408, unported 213 -> 208, registered-untested 27 -> 24
+    // (Macho Brace / Power Item / Quick Powder now tested; the
+    // SetActionsAndBattlersTurnOrder site maps to turn.ts as well).
     expect(result.units.filter((unit) => unit.kind === 'hold-trigger')).toHaveLength(250)
     expect(result.totalDefined).toBe(637)
-    expect(result.totalPorted).toBe(403)
-    expect(result.totalUnported).toBe(213)
+    expect(result.totalPorted).toBe(408)
+    expect(result.totalUnported).toBe(208)
     expect(result.totalAllowlisted).toBe(21)
-    expect(result.totalRegisteredUntested).toBe(27)
+    expect(result.totalRegisteredUntested).toBe(24)
   }, 240_000)
 })

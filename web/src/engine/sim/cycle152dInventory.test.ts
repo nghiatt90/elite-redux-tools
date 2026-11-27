@@ -263,7 +263,9 @@ describe('cycle 152d - pinned counts', () => {
     // Cycle 156: Binding Band (`battle_util.c:2682`) gained a test (215 unported, 27 untested).
     // Cycle 152f: Natural Gift GetMovePriority ported (214 unported).
     // Cycle 152h: BattleScript_MoveEffectBugBite ported (213 unported).
-    expect(result.totalUnported).toBe(213)
-    expect(result.totalRegisteredUntested).toBe(27)
+    // Cycle s20l: Macho Brace / Power Item / Quick Powder now tested and the
+    // SetActionsAndBattlersTurnOrder site maps to turn.ts too (208 unported, 24 untested).
+    expect(result.totalUnported).toBe(208)
+    expect(result.totalRegisteredUntested).toBe(24)
   })
 })
