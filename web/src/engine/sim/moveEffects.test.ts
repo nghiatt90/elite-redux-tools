@@ -8856,8 +8856,9 @@ describe('Fix brief findings: Stat drop block abilities, Protect branch, line 99
             expect(state.battlers[0]!.partyIndex).toBe(1)
             expect(state.battlers[0]!.mon.hp).toBe(100)
             expect(state.battlers[0]!.mon.status1).toBe(0)
-            // PP restored to Tackle's base PP in moves.json (20 in Elite Redux)
-            expect(state.battlers[0]!.mon.pp[0]).toBe(20)
+            // PP restored by CalculatePPWithBonus (pokemon.c:2260-2263): Tackle's
+            // base 20 + the always-3 PP Ups -> 20 + (20*20*3)/100 = 32.
+            expect(state.battlers[0]!.mon.pp[0]).toBe(32)
           })
 
           it('fails via BattleScript_ButItFailedAtkStringPpReduce and user DOES NOT faint when no valid live reserve exists', () => {

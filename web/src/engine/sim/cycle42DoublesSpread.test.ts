@@ -400,7 +400,9 @@ describe('(6) singles deep-equal', () => {
     expect(JSON.parse(JSON.stringify(b.outcome))).toEqual(JSON.parse(JSON.stringify(a.outcome)))
     for (const action of a.outcome.actions) expect(action.targets).toBeUndefined()
     expect(first.state.battlers[0]!.mon.pp[0]).toBe(second.state.battlers[0]!.mon.pp[0])
-    expect(first.state.battlers[0]!.mon.pp[0]).toBeLessThan(20)
+    // Tackle starts at CalculatePPWithBonus's 32 (base 20, pokemon.c:2260-2263);
+    // one use deducts one PP.
+    expect(first.state.battlers[0]!.mon.pp[0]).toBe(31)
   })
 
   it('a doubles session built through the production layout still has the four slots', () => {

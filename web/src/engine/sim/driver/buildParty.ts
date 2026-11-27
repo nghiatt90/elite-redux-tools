@@ -7,6 +7,7 @@ import type { Slot4, SimPartyMon } from '../state'
 import type { AbilitySlots } from '../../abilities/dispatch'
 import type { BattleStatKey, StatKey } from '../../types'
 import { loadSimData, type SimDataBundle, type TrainerData, type TrainerMonData } from './loadSimData'
+import { calculatePpWithBonus } from '../maxPp'
 
 let cachedBundle: SimDataBundle | null = null
 
@@ -57,11 +58,14 @@ function resolveMovesAndPp(
     moveIds[2] ?? null,
     moveIds[3] ?? null,
   ]
+  // Every slot gets the always-3 PP bonus (pokemon.c:1487-1488, :2260-2263),
+  // for the player and foe alike. The player's Hell-mode and partner exceptions
+  // are applied in createSession, where the tier and the partner party are known.
   const slotPp: Slot4<number> = [
-    slotMoves[0] ? bundle.dataContext.move(slotMoves[0])?.pp ?? 0 : 0,
-    slotMoves[1] ? bundle.dataContext.move(slotMoves[1])?.pp ?? 0 : 0,
-    slotMoves[2] ? bundle.dataContext.move(slotMoves[2])?.pp ?? 0 : 0,
-    slotMoves[3] ? bundle.dataContext.move(slotMoves[3])?.pp ?? 0 : 0,
+    slotMoves[0] ? calculatePpWithBonus(bundle.dataContext.move(slotMoves[0])?.pp ?? 0) : 0,
+    slotMoves[1] ? calculatePpWithBonus(bundle.dataContext.move(slotMoves[1])?.pp ?? 0) : 0,
+    slotMoves[2] ? calculatePpWithBonus(bundle.dataContext.move(slotMoves[2])?.pp ?? 0) : 0,
+    slotMoves[3] ? calculatePpWithBonus(bundle.dataContext.move(slotMoves[3])?.pp ?? 0) : 0,
   ]
   return { moves: slotMoves, pp: slotPp }
 }

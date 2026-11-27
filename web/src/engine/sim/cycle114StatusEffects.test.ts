@@ -349,7 +349,7 @@ describe('cycle 114 - Restore HP (Heal Order, Recover, Slack Off)', () => {
 // BattleScript_EffectHealingWish :2364-2414.
 describe('cycle 114 - Healing Wish / Lunar Dance', () => {
   const replacement: ReplacementDeps = { chooseReplacement: () => 1 }
-  const tacklePp = DATA_CONTEXT.move('MOVE_TACKLE')!.pp as number
+  const tackleBasePp = DATA_CONTEXT.move('MOVE_TACKLE')!.pp as number
   const setup = (moveId: string) => {
     const mon = withMove(moveId)
     const reserve = partyMon('SPECIES_TREECKO', { hp: 10, status1: STATUS1_POISON, pp: [3, 0, 0, 0] })
@@ -367,14 +367,15 @@ describe('cycle 114 - Healing Wish / Lunar Dance', () => {
     expect(ppOf(state)).toBe(3)
   })
 
-  it('Lunar Dance additionally restores PP (:2394-2396) to the move max from moves data', () => {
+  it('Lunar Dance additionally restores PP (:2394-2396) to CalculatePPWithBonus (pokemon.c:2260-2263)', () => {
     const state = setup('MOVE_LUNAR_DANCE')
     expect(state.sides[0].party[0]!.hp).toBe(0)
     expect(state.battlers[0]!.mon.speciesId).toBe('SPECIES_TREECKO')
     expect(hpOf(state)).toBe(100)
     expect(state.battlers[0]!.mon.status1).toBe(0)
-    expect(tacklePp).toBeGreaterThan(3)
-    expect(ppOf(state)).toBe(tacklePp)
+    // Tackle base PP 20 + the always-3 PP Ups -> 20 + (20*20*3)/100 = 32.
+    expect(tackleBasePp).toBe(20)
+    expect(ppOf(state)).toBe(32)
   })
 
   it.each(['MOVE_HEALING_WISH', 'MOVE_LUNAR_DANCE'])('%s with no live reserve fails: user keeps HP, PP spent once (:2366)', (moveId) => {

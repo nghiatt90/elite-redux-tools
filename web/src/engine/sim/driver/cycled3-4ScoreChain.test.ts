@@ -30,7 +30,7 @@ const data = loadSimData()
 
 const WEAK_FIGHT = 'TRAINER_MAY_ROUTE_103_TORCHIC'
 const STRONG_FIGHT = 'TRAINER_WATTSON_1'
-const ROXANNE = 'TRAINER_ROXANNE_1'
+const BRAWLY = 'TRAINER_BRAWLY_1'
 
 const GARCHOMP: PlayerMonSpec = {
   species: 'SPECIES_GARCHOMP',
@@ -157,20 +157,22 @@ describe('cycle d3-4: scoreChain', () => {
   })
 
   it('carries damage into the next stage: a fainted lead stays fainted and changes stage 2', { timeout: 30_000 }, () => {
-    // Generic team vs Roxanne on the stage-1 seed: the team wins, but only after the
+    // Generic team vs Brawly on the game-2 stage seed: the team wins, but only after the
     // first four slots have fainted (slots 4-5 finish the fight), so the next lead is
-    // slot 4 -- the carried party is exactly the damaged one.
+    // slot 4 -- the carried party is exactly the damaged one. Game 1 is no longer this
+    // shape: every move now starts with the bonus-3 PP maximum (pokemon.c:1487-1488,
+    // :2260-2263), so the foes last longer; the game-2 seed reproduces the same shape.
     const team: Team = GENERIC_PLAYER_SPECS
-    const twoStage = chain('carry-two-stage', [ROXANNE, STRONG_FIGHT])
+    const twoStage = chain('carry-two-stage', [BRAWLY, STRONG_FIGHT])
     const start = startParty(team)
     const t = 'elite' as const
 
     const first = playExpectimaxBattle({
       data,
       playerParty: start,
-      opponentTrainer: trainer(ROXANNE),
+      opponentTrainer: trainer(BRAWLY),
       tier: t,
-      seed: 1001,
+      seed: 2001,
     })
     expect(first.outcome).toBe('WON')
     expect(first.finalParty.slice(0, 4).map((mon) => mon.hp)).toEqual([0, 0, 0, 0])
@@ -186,7 +188,7 @@ describe('cycle d3-4: scoreChain', () => {
       playerParty: carried,
       opponentTrainer: trainer(STRONG_FIGHT),
       tier: t,
-      seed: 1002,
+      seed: 2002,
       leadIndex: firstLiveSlot(carried),
     })
     const fromHealed = playExpectimaxBattle({
@@ -194,7 +196,7 @@ describe('cycle d3-4: scoreChain', () => {
       playerParty: start,
       opponentTrainer: trainer(STRONG_FIGHT),
       tier: t,
-      seed: 1002,
+      seed: 2002,
       leadIndex: firstLiveSlot(carried),
     })
     expect(
@@ -202,7 +204,7 @@ describe('cycle d3-4: scoreChain', () => {
     ).toBe(true)
 
     // And the loop really does carry: stage 2's party starts with slot 0 at 0 HP.
-    const once = playChainOnce(data, twoStage, t, team, 1)
+    const once = playChainOnce(data, twoStage, t, team, 2)
     expect(once).toHaveLength(2)
     expect(once[1]!.partyHp[0]).toBe(0)
   })

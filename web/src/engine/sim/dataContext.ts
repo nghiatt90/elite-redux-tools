@@ -118,7 +118,8 @@ export interface SimMoveData {
   sheerForceBoost?: true
   /** moves.json's `effectChance` (MoveList.proto `effect_chance`). */
   effectChance?: number
-  /** moves.json's `pp` -- gBattleMoves[move].pp, read by VARIOUS_RESTORE_PP (Lunar Dance). */
+  /** moves.json's `pp` -- gBattleMoves[move].pp, the base PP CalculatePPWithBonus
+   * (pokemon.c:2260-2263) turns into the starting/refilled maximum. */
   pp?: number
   /** moves.json's `argument` when kind is 'effect' or other structured argument. */
   argument?: {

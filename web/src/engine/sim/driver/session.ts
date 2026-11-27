@@ -31,6 +31,7 @@ import { buildOpponentParty } from './buildParty'
 import { battleTypeFlagsFor, buildBattleState, gatePlayerInnates, type BattleFormat } from './battleFormat'
 import type { SimDataBundle, TrainerData } from './loadSimData'
 import { partySlotsFor } from '../partySlots'
+import { calculatePlayerPpWithBonus } from '../maxPp'
 
 export type Tier = 'ace' | 'elite' | 'hell'
 
@@ -328,6 +329,22 @@ export function createSession(options: SessionOptions): BattleSession {
   // level and difficulty; the AI keeps all three (buildOpponentParty is untouched).
   gatePlayerInnates(playerParty, tier)
 
+  // CalculatePPWithBonusPlayer (pokemon.c:2239-2258): in Hell mode the player's
+  // sleep moves and Rest/Sleep Talk get 2 PP and every other move base PP
+  // (isHellMode, pokemon.c:6432). Take the min so a caller's deliberately lowered
+  // PP survives; other tiers keep the bonus-3 maximum from buildPlayerParty.
+  if (tier === 'hell') {
+    for (const mon of playerParty) {
+      for (let i = 0; i < 4; i++) {
+        const moveId = mon.moves[i]
+        if (!moveId) continue
+        const move = data.dataContext.move(moveId)
+        if (move?.pp === undefined) continue
+        mon.pp[i] = Math.min(mon.pp[i], calculatePlayerPpWithBonus(move.pp, move.effect, true))
+      }
+    }
+  }
+
   const playerMaxLevel = Math.max(...playerParty.map((m) => m.level))
 
   // FillPartnerParty (battle_tower.c:2394-2461): partner mons are built from the
@@ -340,6 +357,18 @@ export function createSession(options: SessionOptions): BattleSession {
     }
     const partnerLevel = Math.max(1, Math.min(100, playerMaxLevel))
     partnerParty = buildOpponentParty(format.partner, 'ace', partnerLevel, data).slice(0, MULTI_PARTY_SIZE)
+    // FillPartnerParty writes plain base PP, not the bonus-3 maximum
+    // (battle_tower.c:2450-2453). CB2_HandleStartMultiPartnerBattle never calls
+    // HealPlayerParty (battle_main.c:1008), so the partner stays at base PP in
+    // every tier, Hell included.
+    for (const mon of partnerParty) {
+      for (let i = 0; i < 4; i++) {
+        const moveId = mon.moves[i]
+        if (!moveId) continue
+        const basePp = data.dataContext.move(moveId)?.pp
+        if (basePp !== undefined) mon.pp[i] = basePp
+      }
+    }
   }
 
   const opponentParties = format.opponents.map((trainer) => buildOpponentParty(trainer, tier, playerMaxLevel, data))

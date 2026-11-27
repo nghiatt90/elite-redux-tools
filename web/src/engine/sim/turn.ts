@@ -131,6 +131,7 @@ import { getMovePriority, recalculateMoveOrder, setActionsAndBattlersTurnOrder, 
 import type { GroundingContext } from './grounding'
 import { isBattlerGrounded } from './grounding'
 import type { SimDataContext, SimMoveData } from './dataContext'
+import { calculatePlayerPpWithBonus, calculatePpWithBonus } from './maxPp'
 import { gapsToUnmodelled, weatherFromBitfield } from './bridge'
 import { buildAccuracyInputs, tryAnticipationMiss } from './accuracyBridge'
 import { getTotalAccuracy } from './accuracy'
@@ -2153,13 +2154,19 @@ export function performSwitchAction(
       incomingSlot.hp = incomingSlot.maxHp
       incomingSlot.status1 = 0
       if (options.lunarDance) {
-        // VARIOUS_RESTORE_PP (battle_scripts_1.s:2396, battle_script_commands.c:7116-7129)
+        // VARIOUS_RESTORE_PP (battle_scripts_1.s:2396, battle_script_commands.c:7116-7129):
+        // the player side (battlers 0 and 2, partner included) uses
+        // CalculatePPWithBonusPlayer (pokemon.c:2239-2258), the foe side
+        // CalculatePPWithBonus (pokemon.c:2260-2263).
         for (let mIdx = 0; mIdx < incomingSlot.moves.length; mIdx++) {
           const mId = incomingSlot.moves[mIdx]
           if (mId) {
             const mData = deps.dataContext.move(mId)
             if (mData?.pp !== undefined) {
-              incomingSlot.pp[mIdx] = mData.pp
+              incomingSlot.pp[mIdx] =
+                (battlerId & 1) === 0
+                  ? calculatePlayerPpWithBonus(mData.pp, mData.effect, state.tier === 'hell')
+                  : calculatePpWithBonus(mData.pp)
             }
           }
         }

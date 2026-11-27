@@ -53,9 +53,11 @@ export function carryParty(
   // every slot's held item goes back to the one captured at battle start
   // (battle_main.c:2781, itemStolen[i].originalItem) -- a consumed berry or Focus
   // Sash included. Taking itemId from `startParty` is exactly that.
-  // PP is restored by CalculateMonStats' shouldRestorePP (pokemon.c:1013-1019), which
-  // sets each move's PP back to its base PP. The sim does not model PP bonuses or
-  // PP Ups, so base PP is `startParty[i].pp`.
+  // PP is restored by CalculateMonStats' shouldRestorePP (pokemon.c:1013-1019)
+  // and then MonRestorePP (pokemon.c:4211-4221), which sets each slot to
+  // CalculatePPWithBonus -- the bonus-3 maximum (pokemon.c:2260-2263).
+  // `startParty[i].pp` already holds that maximum (buildParty.ts), so taking it
+  // is exactly the C's restore.
   // Abilities stay as `startParty` has them (UNGATED): `createSession` runs
   // gateInnates on its own clone of whatever party it is handed
   // (session.ts:266-268), so carrying the session's already-gated innates would
